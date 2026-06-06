@@ -155,9 +155,9 @@ function PayerAction({
       <button
         className="primary-button full-width"
         disabled={status === "encrypting" || status === "paid"}
-        onClick={() => onPay("0xDemoPayer000000000000000000000000000000000", "Demo payer")}
+        onClick={() => onPay("0x000000000000000000000000000000000000dEaD", "Local payer")}
       >
-        {status === "encrypting" ? "Encrypting demo payment..." : status === "paid" ? "Payment recorded" : `Pay ${invoice.amount} ${invoice.token}`}
+        {status === "encrypting" ? "Encrypting payment input..." : status === "paid" ? "Payment recorded" : `Pay ${invoice.amount} ${invoice.token}`}
       </button>
     );
   }

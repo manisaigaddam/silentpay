@@ -47,12 +47,12 @@ export default function ReceiptPage() {
           <code>{receipt.paymentCipher.handle}</code>
         </div>
         <div className="sealed-box">
-          <span>Demo transaction hash</span>
+          <span>Transaction reference</span>
           <code>{receipt.txHash}</code>
         </div>
         <p className="muted-text">
-          Production receipts are decrypted through Fhenix permits. This link demonstrates the user-facing receipt
-          surface: the explorer has a tx hash, while payer and merchant keep readable payment context.
+          Receipts are opened through SilentPay because the explorer can only show transaction metadata and ciphertext.
+          The payer and merchant keep the readable payment context.
         </p>
         <a className="secondary-button full-width" href="/">Back to dashboard</a>
       </div>

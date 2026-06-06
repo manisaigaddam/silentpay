@@ -3,7 +3,7 @@ export type InvoiceStatus = "open" | "paid" | "expired";
 export type TokenSymbol = "fhUSDC" | "fhETH" | "USDC";
 
 export interface PrivacyEnvelope {
-  kind: "demo-local-seal" | "cofhe-encrypted-input";
+  kind: "local-preview-seal" | "cofhe-encrypted-input";
   handle: string;
   inputProof: string;
   note: string;
@@ -74,10 +74,10 @@ export function createPrivacyEnvelope(value: string, purpose: string): PrivacyEn
   const encoded = encodeBase64Url(seed);
 
   return {
-    kind: "demo-local-seal",
+    kind: "local-preview-seal",
     handle: `0x${encoded.padEnd(64, "0").slice(0, 64)}`,
     inputProof: `proof_${encodeBase64Url(`${seed}:proof`).slice(0, 32)}`,
-    note: "Demo seal. Production replaces this with @cofhe/sdk encrypted input + inputProof.",
+    note: "Local preview seal. The onchain path uses @cofhe/sdk encrypted input plus inputProof.",
   };
 }
 

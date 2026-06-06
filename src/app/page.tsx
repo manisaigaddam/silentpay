@@ -20,10 +20,10 @@ import {
 const hasPrivy = Boolean(process.env.NEXT_PUBLIC_PRIVY_APP_ID);
 
 const defaultMerchant = {
-  merchantName: "Fhenix Hyderabad Demo",
+  merchantName: "SilentPay Merchant",
   merchantAddress: "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
-  title: "Private builder checkout",
-  memo: "Confidential invoice for services, access, or digital goods.",
+  title: "Private invoice",
+  memo: "Order details visible only to the payer and merchant.",
   amount: "12.50",
   token: "fhUSDC" as TokenSymbol,
 };
@@ -83,7 +83,7 @@ export default function Home() {
           <span className="brand-mark">S</span>
           <span>
             <strong>SilentPay</strong>
-            <small>Private checkout for Fhenix payments</small>
+            <small>Confidential checkout infrastructure</small>
           </span>
         </a>
         <AuthBlock />
@@ -92,10 +92,10 @@ export default function Home() {
       <section className="hero-grid">
         <div className="hero-copy">
           <p className="eyebrow">Base Sepolia / Fhenix-ready / Privy onboarding</p>
-          <h1>Stripe-style private payment links without wallet UX pain.</h1>
+          <h1>Private payment links for confidential onchain checkout.</h1>
           <p>
-            Merchants create encrypted invoices. Payers scan or open one link, see the invoice on SilentPay, then sign an
-            encrypted payment transaction. Only payer and merchant can recover the amount, memo, and receipt.
+            SilentPay lets merchants issue confidential invoices and lets payers complete them from one link or QR.
+            Invoice details, payment amounts, and receipts stay readable only to the parties involved.
           </p>
           <div className="hero-actions">
             <a href="#create" className="primary-button">Create invoice</a>
@@ -105,15 +105,15 @@ export default function Home() {
         <div className="signal-panel">
           <div>
             <span className="metric">{invoices.length}</span>
-            <p>Total invoices on this device</p>
+            <p>Invoices created locally</p>
           </div>
           <div>
             <span className="metric">{openInvoices}</span>
-            <p>Open private checkouts</p>
+            <p>Open invoices</p>
           </div>
           <div>
             <span className="metric">{paidInvoices}</span>
-            <p>Receipts marked paid</p>
+            <p>Paid receipts</p>
           </div>
           <div className="network-pill">Running on {baseSepolia.name}</div>
         </div>
@@ -161,7 +161,7 @@ export default function Home() {
         <div className="panel">
           <div className="section-heading">
             <p className="eyebrow">Payment link</p>
-            <h2>Shareable checkout</h2>
+            <h2>Checkout link and QR</h2>
           </div>
           {lastLink ? (
             <div className="link-result">
@@ -190,14 +190,14 @@ export default function Home() {
 
       <section className="panel developer-panel" id="developer">
         <div className="section-heading">
-          <p className="eyebrow">Developer protocol</p>
-          <h2>Plug-and-play layer, not another wallet</h2>
+          <p className="eyebrow">Developer layer</p>
+          <h2>Integrate private checkout in any app</h2>
         </div>
         <div className="flow-grid">
-          <FlowStep index="01" title="Create invoice" text="Merchant calls SilentPay API/SDK. Metadata is encrypted; URL carries an invoice ID and a client-side secret fragment." />
-          <FlowStep index="02" title="Checkout" text="Payer opens SilentPay web/mobile page. Privy can create an embedded wallet so there is no WalletConnect ceremony." />
-          <FlowStep index="03" title="FHE payment" text="Checkout encrypts payment amount with CoFHE, then wallet signs a contract call containing ciphertext and inputProof." />
-          <FlowStep index="04" title="Private receipt" text="Contract grants decrypt permissions to payer and merchant only. Explorer sees tx metadata and ciphertext handles." />
+          <FlowStep index="01" title="Create" text="The merchant creates an invoice. Private metadata is sealed offchain; the contract stores only an invoice commitment and encrypted expected amount." />
+          <FlowStep index="02" title="Open" text="The payer opens a SilentPay checkout link or QR. Privy can create an embedded wallet for users without an existing wallet." />
+          <FlowStep index="03" title="Encrypt" text="The checkout page encrypts payment input with CoFHE and prepares calldata containing ciphertext plus inputProof." />
+          <FlowStep index="04" title="Settle" text="The contract records encrypted payment state and grants decrypt access only to the payer and merchant." />
         </div>
         <pre className="code-block">{`// Intended SDK shape
 const invoice = await silentpay.invoices.create({
@@ -254,10 +254,10 @@ function HistoryPanel({ invoices, receipts }: { invoices: SilentInvoice[]; recei
     <div className="panel">
       <div className="section-heading">
         <p className="eyebrow">Receipts</p>
-        <h2>Anyone can review their own payments</h2>
+        <h2>Payment records for both sides</h2>
       </div>
       <p className="muted-text">
-        The dashboard is for both sides. Merchants see their created invoices; payers see receipts they received or saved.
+        Merchants track invoices they created. Payers keep receipt links for invoices they completed.
       </p>
       <div className="mini-list">
         {recentItems.length ? (
@@ -268,7 +268,7 @@ function HistoryPanel({ invoices, receipts }: { invoices: SilentInvoice[]; recei
             </a>
           ))
         ) : (
-          <p className="tiny">No receipts yet. Pay an invoice to generate a private receipt link.</p>
+          <p className="tiny">No receipts yet. Complete an invoice to generate a private receipt link.</p>
         )}
       </div>
       <div className="mini-list">
@@ -288,7 +288,7 @@ function PrivacyPanel() {
     <div className="panel privacy-panel">
       <div className="section-heading">
         <p className="eyebrow">Explorer view</p>
-        <h2>What stays visible?</h2>
+        <h2>Public chain data vs private payment data</h2>
       </div>
       <div className="privacy-columns">
         <div>

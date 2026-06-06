@@ -1,35 +1,31 @@
 # SilentPay
 
-Private checkout links for Fhenix-style confidential payments.
+Confidential payment links and checkout infrastructure for Fhenix-enabled payments.
 
-SilentPay is not a wallet. It is a merchant/developer layer:
+SilentPay focuses on the merchant and developer layer:
 
-- merchants create encrypted invoices
-- payers open one checkout link or QR
-- the checkout page prepares encrypted payment calldata
-- a wallet or Privy embedded wallet signs the transaction
-- payer and merchant get private receipt links
-- public explorers see transaction metadata and ciphertext handles, not amount/memo
+- create private invoices
+- share a payment link or QR
+- let payers complete payment from a single checkout page
+- keep invoice amount, memo, receipt, and merchant analytics private
+- expose only transaction metadata and ciphertext handles publicly
 
-## Current Build
+## Current App
 
-This first app is a working Next.js prototype:
+This repo contains the production UI foundation for SilentPay:
 
-- `src/app/page.tsx` - merchant invoice creation, QR/link generation, payment/receipt history, protocol explanation
+- `src/app/page.tsx` - merchant invoice creation, QR/link generation, receipt history, protocol overview
 - `src/app/invoice/[id]/page.tsx` - payer checkout flow
-- `src/app/receipt/[id]/page.tsx` - private receipt page
-- `src/lib/silentpay.ts` - invoice/receipt model, demo privacy envelope, local storage helpers
+- `src/app/receipt/[id]/page.tsx` - private receipt view
+- `src/lib/silentpay.ts` - invoice/receipt model and local preview envelope
+- `contracts/SilentPayInvoices.sol` - first Fhenix encrypted invoice accounting contract
+- `src/lib/fhenix-client.ts` - calldata helpers for wiring encrypted inputs into the app
 
-The demo privacy envelope is intentionally labeled. Production replaces it with:
-
-- `@cofhe/sdk` encrypted inputs
-- FHERC20/private-token payment contract
-- `FHE.allow(...)` permissions for payer and merchant
-- Base Sepolia/Fhenix-compatible settlement contract addresses
+The app currently uses a local preview envelope so the interface can be deployed and tested on Vercel immediately. The Fhenix path is scaffolded and should replace the preview envelope with CoFHE encrypted inputs.
 
 ## Environment
 
-Copy `.env.example` to `.env.local`:
+Create `.env.local` from `.env.example`:
 
 ```bash
 cp .env.example .env.local
@@ -46,45 +42,53 @@ NEXT_PUBLIC_FHERC20_ADDRESS=0x...
 NEXT_PUBLIC_COFHE_ENV=testnet
 ```
 
-Only `NEXT_PUBLIC_PRIVY_APP_ID` is needed to enable Privy login/embedded-wallet UX in the current prototype. Contract addresses are placeholders for the next implementation step.
+For Vercel, add the same values in Project Settings -> Environment Variables.
 
-## Run
+Required now:
 
-```bash
-npm install
-npm run dev
-```
+- `NEXT_PUBLIC_PRIVY_APP_ID` enables Privy login and embedded-wallet onboarding.
 
-Open:
+Required after contract deployment:
 
-```text
-http://localhost:3000
-```
+- `NEXT_PUBLIC_SILENTPAY_CONTRACT_ADDRESS`
+- `NEXT_PUBLIC_FHERC20_ADDRESS`
+- `NEXT_PUBLIC_COFHE_ENV`
 
 ## Payment Flow
 
 Merchant:
 
 1. Sign in with Privy.
-2. Create an invoice with amount, token, title, memo, and settlement address.
-3. SilentPay creates a checkout link and QR.
-4. Link uses an invoice route plus URL fragment payload, so private details are not sent as query params.
+2. Create an invoice with merchant address, amount, token, title, and private memo.
+3. SilentPay creates a link and QR.
+4. The link opens a checkout page with invoice data carried through a private URL fragment.
 
 Payer:
 
 1. Opens the link or scans the QR.
-2. SilentPay checkout shows the invoice details.
-3. Checkout prepares encrypted payment input.
-4. Privy embedded wallet or external wallet signs the transaction.
-5. Payer receives a private receipt link.
+2. SilentPay shows the invoice details.
+3. The checkout encrypts the payment amount.
+4. Privy embedded wallet or an external wallet signs the transaction.
+5. SilentPay creates a receipt link for the payer and merchant.
 
-Production onchain behavior:
+Onchain privacy target:
 
-- public: tx hash, block, gas, SilentPay/FHERC20 contract, ciphertext handles
-- private: amount, memo, merchant balance, receipt details, payer payment history
+- Public: transaction hash, block, gas, contract address, ciphertext handles, input proof.
+- Private: amount, memo, merchant balance, receipt details, payer history, merchant analytics.
 
-## Why This Is Different
+## Fhenix Implementation Target
 
-- Fhenix Pay is wallet-first private transfer UX.
-- Privara is broader stablecoin infrastructure with escrow, smart wallets, and cross-chain routing.
-- SilentPay is checkout-first infrastructure: private payment links, QR links, embeddable checkout, receipts, and eventually x402-compatible verification for paid APIs.
+`contracts/SilentPayInvoices.sol` records encrypted invoice accounting:
+
+- `createInvoice(...)` stores encrypted expected amount.
+- `payInvoice(...)` records encrypted paid amount.
+- `FHE.add(...)` accumulates private payments.
+- `FHE.allow(...)` grants decrypt access to merchant, payer, and optional receipt viewer.
+
+Next engineering steps:
+
+1. Add Hardhat/Fhenix config for the contract package.
+2. Compile and deploy `SilentPayInvoices.sol`.
+3. Replace local preview envelope with `@cofhe/sdk` encrypted input generation.
+4. Submit calldata through Privy embedded wallet on Base Sepolia/Fhenix-supported network.
+5. Add FHERC20 settlement once token interface is selected.
