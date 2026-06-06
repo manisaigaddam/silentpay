@@ -1,7 +1,8 @@
 import { createPublicClient, http, isAddress, type Address } from "viem";
 import { baseSepolia as baseSepoliaChain } from "viem/chains";
 import { baseSepolia, shortAddress } from "./silentpay";
-import { fherc20Abi, getFherc20Address, getSilentPayContractAddress, silentPayInvoicesAbi } from "./fhenix-client";
+import { fherc20Abi, getSilentPayContractAddress, silentPayInvoicesAbi } from "./fhenix-client";
+import { formatTokenAmount, supportedTokens, type TokenSymbol } from "./tokens";
 
 const silentPayEventsAbi = [
   ...silentPayInvoicesAbi,
@@ -55,12 +56,34 @@ export interface ChainPaymentRecord {
   encryptedValue: `0x${string}`;
   transactionHash: `0x${string}`;
   blockNumber: bigint;
+  tokenSymbol: TokenSymbol;
+  tokenAddress: Address;
 }
 
 export interface ChainHistory {
   invoices: ChainInvoiceRecord[];
   payments: ChainPaymentRecord[];
-  tokenSymbol: string;
+}
+
+export interface TokenBalanceRecord {
+  symbol: TokenSymbol;
+  address: Address;
+  name: string;
+  underlying: string;
+  indicatedBalance: bigint;
+  indicatedFormatted: string;
+  encryptedHandle: `0x${string}` | null;
+  indicatorTick: bigint | null;
+}
+
+export interface Fherc20MetadataRecord {
+  address: Address;
+  isFherc20: boolean;
+  name: string;
+  symbol: string;
+  decimals: number;
+  balanceOfIsIndicator: boolean;
+  indicatorTick: bigint | null;
 }
 
 export function createSilentPayPublicClient() {
@@ -75,11 +98,10 @@ export function createSilentPayPublicClient() {
 export async function readChainHistory(account?: string): Promise<ChainHistory> {
   const client = createSilentPayPublicClient();
   const invoiceContract = getSilentPayContractAddress();
-  const fherc20 = getFherc20Address();
   const fromBlock = await resolveFromBlock(client);
   const normalizedAccount = account && isAddress(account) ? (account as Address) : undefined;
 
-  const [invoiceEvents, sentPayments, receivedPayments, tokenSymbol] = await Promise.all([
+  const [invoiceEvents, tokenPaymentGroups] = await Promise.all([
     invoiceContract
       ? client.getContractEvents({
           address: invoiceContract,
@@ -89,31 +111,30 @@ export async function readChainHistory(account?: string): Promise<ChainHistory> 
           fromBlock,
         })
       : Promise.resolve([]),
-    fherc20 && normalizedAccount
-      ? client.getContractEvents({
-          address: fherc20,
-          abi: fherc20EventsAbi,
-          eventName: "EncTransfer",
-          args: { from: normalizedAccount },
-          fromBlock,
-        })
+    normalizedAccount
+      ? Promise.all(
+          supportedTokens.map(async token => {
+            const [sent, received] = await Promise.all([
+              client.getContractEvents({
+                address: token.address,
+                abi: fherc20EventsAbi,
+                eventName: "EncTransfer",
+                args: { from: normalizedAccount },
+                fromBlock,
+              }),
+              client.getContractEvents({
+                address: token.address,
+                abi: fherc20EventsAbi,
+                eventName: "EncTransfer",
+                args: { to: normalizedAccount },
+                fromBlock,
+              }),
+            ]);
+
+            return { token, events: [...sent, ...received] };
+          }),
+        )
       : Promise.resolve([]),
-    fherc20 && normalizedAccount
-      ? client.getContractEvents({
-          address: fherc20,
-          abi: fherc20EventsAbi,
-          eventName: "EncTransfer",
-          args: { to: normalizedAccount },
-          fromBlock,
-        })
-      : Promise.resolve([]),
-    fherc20
-      ? client.readContract({
-          address: fherc20,
-          abi: fherc20EventsAbi,
-          functionName: "symbol",
-        }).catch(() => "FHERC20")
-      : Promise.resolve("FHERC20"),
   ]);
 
   return {
@@ -127,19 +148,116 @@ export async function readChainHistory(account?: string): Promise<ChainHistory> 
         blockNumber: event.blockNumber,
       }))
       .sort((a, b) => Number(b.blockNumber - a.blockNumber)),
-    payments: [...sentPayments, ...receivedPayments]
-      .filter(event => event.args.from && event.args.to && event.args.evalue)
-      .map(event => ({
+    payments: tokenPaymentGroups
+      .flatMap(group =>
+        group.events
+          .filter(event => event.args.from && event.args.to && event.args.evalue)
+          .map(event => ({
         from: event.args.from as Address,
         to: event.args.to as Address,
         encryptedValue: event.args.evalue as `0x${string}`,
         transactionHash: event.transactionHash,
         blockNumber: event.blockNumber,
-      }))
+            tokenSymbol: group.token.symbol,
+            tokenAddress: group.token.address,
+          })),
+      )
       .filter((event, index, events) => events.findIndex(item => item.transactionHash === event.transactionHash) === index)
       .sort((a, b) => Number(b.blockNumber - a.blockNumber)),
-    tokenSymbol,
   };
+}
+
+export async function readFherc20Metadata(address: string): Promise<Fherc20MetadataRecord> {
+  if (!isAddress(address)) {
+    throw new Error("Token address is not a valid EVM address.");
+  }
+
+  const client = createSilentPayPublicClient();
+  const tokenAddress = address as Address;
+  const [isFherc20, name, symbol, decimals, balanceOfIsIndicator, indicatorTick] = await Promise.all([
+    client.readContract({
+      address: tokenAddress,
+      abi: fherc20EventsAbi,
+      functionName: "isFherc20",
+    }),
+    client.readContract({
+      address: tokenAddress,
+      abi: fherc20EventsAbi,
+      functionName: "name",
+    }),
+    client.readContract({
+      address: tokenAddress,
+      abi: fherc20EventsAbi,
+      functionName: "symbol",
+    }),
+    client.readContract({
+      address: tokenAddress,
+      abi: fherc20EventsAbi,
+      functionName: "decimals",
+    }),
+    client.readContract({
+      address: tokenAddress,
+      abi: fherc20EventsAbi,
+      functionName: "balanceOfIsIndicator",
+    }),
+    client.readContract({
+      address: tokenAddress,
+      abi: fherc20EventsAbi,
+      functionName: "indicatorTick",
+    }).catch(() => null),
+  ]);
+
+  return {
+    address: tokenAddress,
+    isFherc20,
+    name,
+    symbol,
+    decimals: Number(decimals),
+    balanceOfIsIndicator,
+    indicatorTick,
+  };
+}
+
+export async function readTokenBalances(account?: string): Promise<TokenBalanceRecord[]> {
+  if (!account || !isAddress(account)) return [];
+
+  const client = createSilentPayPublicClient();
+  const owner = account as Address;
+
+  return Promise.all(
+    supportedTokens.map(async token => {
+      const [indicatedBalance, encryptedHandle, indicatorTick] = await Promise.all([
+        client.readContract({
+          address: token.address,
+          abi: fherc20EventsAbi,
+          functionName: "balanceOf",
+          args: [owner],
+        }),
+        client.readContract({
+          address: token.address,
+          abi: fherc20EventsAbi,
+          functionName: "encBalanceOf",
+          args: [owner],
+        }).catch(() => null),
+        client.readContract({
+          address: token.address,
+          abi: fherc20EventsAbi,
+          functionName: "indicatorTick",
+        }).catch(() => null),
+      ]);
+
+      return {
+        symbol: token.symbol,
+        address: token.address,
+        name: token.name,
+        underlying: token.underlying,
+        indicatedBalance,
+        indicatedFormatted: formatTokenAmount(indicatedBalance, token.symbol),
+        encryptedHandle,
+        indicatorTick,
+      };
+    }),
+  );
 }
 
 export function chainInvoiceLabel(invoice: ChainInvoiceRecord) {

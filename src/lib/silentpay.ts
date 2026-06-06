@@ -1,6 +1,8 @@
 export type InvoiceStatus = "open" | "paid" | "expired";
 
-export type TokenSymbol = "fhUSDC" | "fhETH";
+import type { TokenSymbol } from "./tokens";
+
+export type { TokenSymbol };
 
 export type PaymentRail = "privy-email-wallet" | "connected-wallet";
 
@@ -19,6 +21,7 @@ export interface SilentInvoice {
   memo: string;
   amount: string;
   token: TokenSymbol;
+  tokenAddress: string;
   expiresAt: string;
   createdAt: string;
   status: InvoiceStatus;
@@ -36,6 +39,7 @@ export interface SilentReceipt {
   memo: string;
   amount: string;
   token: TokenSymbol;
+  tokenAddress: string;
   txHash: string;
   paidAt: string;
   rail: PaymentRail;
@@ -113,15 +117,6 @@ export function shortAddress(address: string) {
 export function railLabel(rail: PaymentRail) {
   if (rail === "privy-email-wallet") return "Privy email wallet";
   return "Connected wallet";
-}
-
-export function tokenLabel(token: TokenSymbol) {
-  if (token === "fhUSDC") return "fhUSDC private stablecoin";
-  return "fhETH private native-style token";
-}
-
-export function tokenDecimals(token: TokenSymbol) {
-  return token === "fhETH" ? 18 : 6;
 }
 
 function decodePayload<T extends { version: number }>(hash: string, version: number): T | null {

@@ -40,6 +40,7 @@ export default function ReceiptPage() {
           <p><span>Payer</span><strong>{receipt.payerLabel}</strong></p>
           <p><span>Merchant address</span><strong>{shortAddress(receipt.merchantAddress)}</strong></p>
           <p><span>Payer address</span><strong>{shortAddress(receipt.payerAddress)}</strong></p>
+          <p><span>Token contract</span><strong>{shortAddress(receipt.tokenAddress)}</strong></p>
           <p><span>Payment rail</span><strong>{railLabel(receipt.rail)}</strong></p>
           <p><span>Paid at</span><strong>{new Date(receipt.paidAt).toLocaleString()}</strong></p>
         </div>

@@ -22,7 +22,7 @@ This repo contains the production UI foundation for SilentPay:
 - `src/lib/browser-wallet.ts` - Privy/viem browser client setup
 - `contracts/contracts/SilentPayInvoices.sol` - first Fhenix encrypted invoice accounting contract
 
-The app expects real FHE configuration: Privy for identity/signing, a deployed SilentPay invoice contract, and an FHERC20 token address for confidential settlement.
+The app expects real FHE configuration: Privy for identity/signing, a deployed SilentPay invoice contract, and supported FHERC20 token contracts for confidential settlement.
 
 ## Environment
 
@@ -39,7 +39,6 @@ NEXT_PUBLIC_PRIVY_APP_ID=your_privy_app_id
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL=https://sepolia.base.org
 NEXT_PUBLIC_SILENTPAY_CONTRACT_ADDRESS=0x...
-NEXT_PUBLIC_FHERC20_ADDRESS=0x0f3521fFe4246fA4285ea989155A7e4607C55f17
 NEXT_PUBLIC_COFHE_ENV=testnet
 NEXT_PUBLIC_SILENTPAY_FROM_BLOCK=
 NEXT_PUBLIC_SILENTPAY_SCAN_BLOCKS=100000
@@ -52,10 +51,17 @@ Required:
 - `NEXT_PUBLIC_PRIVY_APP_ID` enables Privy login and embedded-wallet onboarding.
 - `NEXT_PUBLIC_APP_URL` should be your deployed app URL in production.
 - `NEXT_PUBLIC_SILENTPAY_CONTRACT_ADDRESS`
-- `NEXT_PUBLIC_FHERC20_ADDRESS`
 - `NEXT_PUBLIC_COFHE_ENV`
 - `NEXT_PUBLIC_SILENTPAY_FROM_BLOCK` is optional, but recommended after deployment so event reads start at your contract deployment block.
 - `NEXT_PUBLIC_SILENTPAY_SCAN_BLOCKS` controls fallback event scan depth when `NEXT_PUBLIC_SILENTPAY_FROM_BLOCK` is empty.
+
+Supported FHERC20 settlement tokens live in `src/lib/tokens.ts`. Current Base Sepolia options are:
+
+- `eUSDC` - `0x0f3521fFe4246fA4285ea989155A7e4607C55f17`
+- `eUSDT` - `0x7943Eee6ABaD45A583E2aBEeA6Eb9CB18b4b6987`
+- `ePYUSD` - `0x79Ba1D402d4B6f6334A084A2637B38a89F74a7Bc`
+
+These are FHERC20 contracts verified by reading `isFherc20()`, `symbol()`, and `decimals()` on Base Sepolia. To fund a payer, get the underlying mock asset and shield it through Redact into the matching confidential token.
 
 Contract env:
 
@@ -84,7 +90,7 @@ Put the deployed contract address into `NEXT_PUBLIC_SILENTPAY_CONTRACT_ADDRESS`.
 Merchant:
 
 1. Sign in with Privy.
-2. Create an invoice with merchant address, amount, token, title, and private memo.
+2. Create an invoice with the Privy wallet settlement address, amount, token, title, and private memo.
 3. SilentPay creates a link and local QR without sending the link to a third-party QR service.
 4. Register the invoice onchain. The expected amount is encrypted with CoFHE before signing.
 5. Share the link or QR.
@@ -116,12 +122,13 @@ Onchain privacy target:
 Checkout settlement uses FHERC20:
 
 - `encTransfer(address merchant, InEuint128 amount)` moves confidential tokens in one payer transaction.
+- Each invoice carries the selected FHERC20 token address, so `eUSDC`, `eUSDT`, and `ePYUSD` settle through different token contracts.
 - The checkout prepares the encrypted input with `@cofhe/sdk`.
 - The wallet signs opaque calldata; the explorer cannot read the amount.
 
 Next engineering steps:
 
-1. Compile and deploy `SilentPayInvoices.sol`.
-2. Point `NEXT_PUBLIC_FHERC20_ADDRESS` to the hackathon FHERC20 token. The current sample value is a verified Base Sepolia FHERC20 token (`isFherc20 = true`, symbol `eUSDC`, decimals `6`).
-3. Add encrypted paid-enough checks and public fulfillment events.
-4. Add contract tests for participant access, receipt viewers, and repeated payments.
+1. Set `NEXT_PUBLIC_SILENTPAY_FROM_BLOCK` to the invoice contract deployment block to make history reads faster.
+2. Add encrypted paid-enough checks and public fulfillment events.
+3. Add contract tests for participant access, receipt viewers, and repeated payments.
+4. Add a SilentPay-owned FHERC20 faucet or Redact integration shortcut for easier hackathon testing.

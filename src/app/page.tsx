@@ -5,7 +5,15 @@ import { usePrivy, useWallets } from "@privy-io/react-auth";
 import QRCode from "qrcode";
 import type { Address } from "viem";
 import { createBrowserPaymentClients } from "@/lib/browser-wallet";
-import { chainInvoiceLabel, chainPaymentLabel, readChainHistory, type ChainHistory } from "@/lib/chain-history";
+import {
+  chainInvoiceLabel,
+  chainPaymentLabel,
+  readChainHistory,
+  readFherc20Metadata,
+  readTokenBalances,
+  type ChainHistory,
+  type TokenBalanceRecord,
+} from "@/lib/chain-history";
 import {
   encodeCreateInvoiceCalldata,
   encryptedInputToPrivacyEnvelope,
@@ -20,20 +28,18 @@ import {
   invoiceLink,
   shortAddress,
   SilentInvoice,
-  TokenSymbol,
-  tokenDecimals,
-  tokenLabel,
 } from "@/lib/silentpay";
+import { supportedTokens, tokenAddress, type TokenSymbol } from "@/lib/tokens";
 
 const hasPrivy = Boolean(process.env.NEXT_PUBLIC_PRIVY_APP_ID);
 
 const defaultMerchant = {
   merchantName: "SilentPay Merchant",
-  merchantAddress: "0x742d35Cc6634C0532925a3b844Bc454e4438f44e",
+  merchantAddress: "",
   title: "Private invoice",
   memo: "Order details visible only to the payer and merchant.",
   amount: "12.50",
-  token: "fhUSDC" as TokenSymbol,
+  token: "eUSDC" as TokenSymbol,
 };
 
 export default function Home() {
@@ -82,6 +88,7 @@ export default function Home() {
       memo: form.memo,
       amount: form.amount,
       token: form.token,
+      tokenAddress: tokenAddress(form.token),
       expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24).toISOString(),
       createdAt: new Date().toISOString(),
       status: "open",
@@ -148,7 +155,10 @@ export default function Home() {
             </label>
             <label>
               Merchant settlement address
-              <input value={form.merchantAddress} onChange={event => setForm({ ...form, merchantAddress: event.target.value })} />
+              <MerchantSettlementField
+                value={form.merchantAddress}
+                onAddressChange={merchantAddress => setForm(current => ({ ...current, merchantAddress }))}
+              />
             </label>
             <label>
               Invoice title
@@ -157,8 +167,11 @@ export default function Home() {
             <label>
               Token
               <select value={form.token} onChange={event => setForm({ ...form, token: event.target.value as TokenSymbol })}>
-                <option value="fhUSDC">fhUSDC</option>
-                <option value="fhETH">fhETH</option>
+                {supportedTokens.map(token => (
+                  <option value={token.symbol} key={token.address}>
+                    {token.symbol} - {token.underlying}
+                  </option>
+                ))}
               </select>
             </label>
             <label>
@@ -232,7 +245,7 @@ export default function Home() {
         <pre className="code-block">{`// Intended SDK shape
 const invoice = await silentpay.invoices.create({
   amount: "12.50",
-  token: "fhUSDC",
+  token: "eUSDC",
   memo: "Private order #1842",
 });
 
@@ -261,17 +274,136 @@ function AuthBlock() {
 function PrivyAuthBlock() {
   const { ready, authenticated, login, logout, user } = usePrivy();
   const { wallets } = useWallets();
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [balances, setBalances] = useState<TokenBalanceRecord[]>([]);
+  const [balanceError, setBalanceError] = useState("");
   const address = wallets[0]?.address || "";
+  const email = user?.email?.address || "Privy user";
+
+  useEffect(() => {
+    if (!authenticated || !address || !open) return;
+
+    readTokenBalances(address)
+      .then(setBalances)
+      .catch(error => setBalanceError(error instanceof Error ? error.message : "Could not read token balances."));
+  }, [authenticated, address, open]);
+
+  async function copyAddress() {
+    if (!address) return;
+    await navigator.clipboard.writeText(address);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
+  if (!authenticated) {
+    return (
+      <button className="auth-box auth-button" disabled={!ready} onClick={login}>
+        <span className="profile-avatar">S</span>
+        <span>
+          <strong>Checkout identity</strong>
+          <small>Email wallet or connected wallet.</small>
+        </span>
+      </button>
+    );
+  }
 
   return (
-    <div className="auth-box">
-      <span className={`status-dot ${authenticated ? "live" : "idle"}`} />
-      <div>
-        <strong>{authenticated ? user?.email?.address || "Privy user" : "Checkout identity"}</strong>
-        <small>{authenticated ? shortAddress(address) : "Email wallet or connected wallet."}</small>
-      </div>
-      <button className="small-button" disabled={!ready} onClick={authenticated ? logout : login}>
-        {authenticated ? "Sign out" : "Sign in"}
+    <div className="profile-menu">
+      <button className="auth-box auth-button" disabled={!ready} onClick={() => setOpen(value => !value)}>
+        <span className="profile-avatar">{email.slice(0, 1).toUpperCase()}</span>
+        <span>
+          <strong>{email}</strong>
+          <small>{shortAddress(address)}</small>
+        </span>
+      </button>
+      {open && (
+        <div className="profile-popover">
+          <div className="profile-head">
+            <span className="profile-avatar large">{email.slice(0, 1).toUpperCase()}</span>
+            <div>
+              <strong>{email}</strong>
+              <small>{shortAddress(address)}</small>
+            </div>
+          </div>
+          <div className="detail-list compact">
+            <p><span>Network</span><strong>{baseSepolia.name}</strong></p>
+            <p><span>Wallet</span><strong>{shortAddress(address)}</strong></p>
+          </div>
+          <div className="button-row">
+            <button className="secondary-button" onClick={copyAddress}>{copied ? "Copied" : "Copy address"}</button>
+            <button className="secondary-button" onClick={logout}>Sign out</button>
+          </div>
+          <div className="balance-list">
+            <strong>FHERC20 balances</strong>
+            {balanceError && <p className="tiny error-text">{balanceError}</p>}
+            {balances.length ? (
+              balances.map(balance => (
+                <div className="balance-row" key={balance.address}>
+                  <span>
+                    <strong>{balance.symbol}</strong>
+                    <small>{balance.name}</small>
+                  </span>
+                  <span>
+                    <strong>{balance.indicatedFormatted}</strong>
+                    <small>{balance.encryptedHandle ? `${balance.encryptedHandle.slice(0, 8)}...${balance.encryptedHandle.slice(-6)}` : "No private handle"}</small>
+                  </span>
+                </div>
+              ))
+            ) : (
+              <p className="tiny">Open profile after wallet is ready to read indicated balances from Base Sepolia.</p>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MerchantSettlementField({
+  value,
+  onAddressChange,
+}: {
+  value: string;
+  onAddressChange: (address: string) => void;
+}) {
+  if (!hasPrivy) {
+    return <input value={value} readOnly placeholder="Configure Privy first" />;
+  }
+
+  return <MerchantSettlementFieldInner value={value} onAddressChange={onAddressChange} />;
+}
+
+function MerchantSettlementFieldInner({
+  value,
+  onAddressChange,
+}: {
+  value: string;
+  onAddressChange: (address: string) => void;
+}) {
+  const { authenticated } = usePrivy();
+  const { wallets } = useWallets();
+  const [copied, setCopied] = useState(false);
+  const walletAddress = wallets[0]?.address || "";
+
+  useEffect(() => {
+    if (authenticated && walletAddress && value !== walletAddress) {
+      onAddressChange(walletAddress);
+    }
+  }, [authenticated, walletAddress, value, onAddressChange]);
+
+  async function copyAddress() {
+    if (!value) return;
+    await navigator.clipboard.writeText(value);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
+  return (
+    <div className="address-control">
+      <input value={value || "Sign in to use your wallet address"} readOnly />
+      <button className="secondary-button" disabled={!value} onClick={copyAddress}>
+        {copied ? "Copied" : "Copy"}
       </button>
     </div>
   );
@@ -333,9 +465,15 @@ function OnchainRegisterPanel({
       const provider = await wallet.getEthereumProvider();
       const account = wallet.address as Address;
       const clients = createBrowserPaymentClients(provider, account);
+      const tokenMetadata = await readFherc20Metadata(invoice.tokenAddress);
+
+      if (!tokenMetadata.isFherc20) {
+        throw new Error("Selected settlement token is not an FHERC20 contract.");
+      }
+
       const encryptedExpectedAmount = await encryptInvoiceAmount({
         amount: invoice.amount,
-        decimals: tokenDecimals(invoice.token),
+        decimals: tokenMetadata.decimals,
         clients,
       });
 
@@ -345,6 +483,7 @@ function OnchainRegisterPanel({
         title: invoice.title,
         memo: invoice.memo,
         token: invoice.token,
+        tokenAddress: invoice.tokenAddress,
       });
 
       const data = encodeCreateInvoiceCalldata({
@@ -509,7 +648,7 @@ function ChainHistoryPanelInner() {
           history.payments.slice(0, 5).map(payment => (
             <a className="mini-row" href={`${baseSepolia.explorer}/tx/${payment.transactionHash}`} target="_blank" rel="noreferrer" key={payment.transactionHash}>
               <span>{chainPaymentLabel(payment, account)}</span>
-              <strong>{history.tokenSymbol}</strong>
+              <strong>{payment.tokenSymbol}</strong>
             </a>
           ))
         ) : (

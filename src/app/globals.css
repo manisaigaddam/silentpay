@@ -116,6 +116,11 @@ button {
   backdrop-filter: blur(18px);
 }
 
+.auth-button {
+  color: var(--text);
+  text-align: left;
+}
+
 .auth-box strong,
 .auth-box small {
   display: block;
@@ -142,6 +147,88 @@ button {
 .status-dot.live {
   background: var(--good);
   box-shadow: 0 0 0 5px rgba(114, 227, 159, 0.08);
+}
+
+.profile-menu {
+  position: relative;
+}
+
+.profile-avatar {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255, 106, 61, 0.45);
+  border-radius: 8px;
+  background: rgba(255, 106, 61, 0.16);
+  color: var(--accent-strong);
+  font-weight: 800;
+}
+
+.profile-avatar.large {
+  width: 42px;
+  height: 42px;
+}
+
+.profile-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 20;
+  width: min(390px, calc(100vw - 32px));
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: rgba(16, 17, 20, 0.98);
+  box-shadow: var(--shadow);
+}
+
+.profile-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.profile-head strong,
+.profile-head small {
+  display: block;
+}
+
+.profile-head small {
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.balance-list {
+  display: grid;
+  gap: 10px;
+}
+
+.balance-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.balance-row strong,
+.balance-row small {
+  display: block;
+}
+
+.balance-row small {
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.balance-row > span:last-child {
+  text-align: right;
 }
 
 .small-button {
@@ -220,6 +307,11 @@ button {
   background: rgba(255, 255, 255, 0.05);
   border-color: var(--line);
   color: var(--text);
+}
+
+.secondary-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .full-width {
@@ -328,6 +420,21 @@ textarea {
   color: var(--text);
   padding: 12px;
   outline: none;
+}
+
+select option {
+  background: #101114;
+  color: var(--text);
+}
+
+.address-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.address-control .secondary-button {
+  min-width: 76px;
 }
 
 textarea {
@@ -491,6 +598,11 @@ code,
   display: grid;
   gap: 10px;
   margin: 22px 0;
+}
+
+.detail-list.compact {
+  margin: 0;
+  gap: 6px;
 }
 
 .detail-list p {

@@ -37,6 +37,62 @@ export const silentPayInvoicesAbi = [
 export const fherc20Abi = [
   {
     type: "function",
+    name: "isFherc20",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    type: "function",
+    name: "name",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "string" }],
+  },
+  {
+    type: "function",
+    name: "symbol",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "string" }],
+  },
+  {
+    type: "function",
+    name: "decimals",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint8" }],
+  },
+  {
+    type: "function",
+    name: "balanceOf",
+    stateMutability: "view",
+    inputs: [{ name: "account", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "encBalanceOf",
+    stateMutability: "view",
+    inputs: [{ name: "account", type: "address" }],
+    outputs: [{ name: "", type: "bytes32" }],
+  },
+  {
+    type: "function",
+    name: "balanceOfIsIndicator",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    type: "function",
+    name: "indicatorTick",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    type: "function",
     name: "encTransfer",
     stateMutability: "nonpayable",
     inputs: [
@@ -146,15 +202,6 @@ export function getSilentPayContractAddress() {
   return address && address.startsWith("0x") ? (address as `0x${string}`) : null;
 }
 
-export function getFherc20Address() {
-  const address = process.env.NEXT_PUBLIC_FHERC20_ADDRESS;
-  return address && address.startsWith("0x") ? (address as `0x${string}`) : null;
-}
-
 export function isContractReady() {
   return Boolean(getSilentPayContractAddress());
-}
-
-export function isFherc20Ready() {
-  return Boolean(getFherc20Address());
 }

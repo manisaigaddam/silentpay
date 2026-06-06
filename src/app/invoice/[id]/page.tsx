@@ -4,12 +4,11 @@ import { useEffect, useState } from "react";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { isAddress, type Address } from "viem";
 import { createBrowserPaymentClients } from "@/lib/browser-wallet";
+import { readFherc20Metadata } from "@/lib/chain-history";
 import {
   encodeFherc20TransferCalldata,
   encryptedInputToPrivacyEnvelope,
   encryptInvoiceAmount,
-  getFherc20Address,
-  isFherc20Ready,
 } from "@/lib/fhenix-client";
 import {
   baseSepolia,
@@ -22,9 +21,8 @@ import {
   shortAddress,
   SilentInvoice,
   SilentReceipt,
-  tokenDecimals,
-  tokenLabel,
 } from "@/lib/silentpay";
+import { tokenAddress, tokenLabel } from "@/lib/tokens";
 
 const hasPrivy = Boolean(process.env.NEXT_PUBLIC_PRIVY_APP_ID);
 type CheckoutStatus = "idle" | "encrypting" | "paid";
@@ -67,6 +65,7 @@ export default function InvoicePage() {
       memo: invoice.memo,
       amount: invoice.amount,
       token: invoice.token,
+      tokenAddress: invoice.tokenAddress || tokenAddress(invoice.token),
       txHash: payment.txHash,
       paidAt: new Date().toISOString(),
       rail: payment.rail,
@@ -116,6 +115,7 @@ export default function InvoicePage() {
             <p><span>Settlement</span><strong>{shortAddress(invoice.merchantAddress)}</strong></p>
             <p><span>Network</span><strong>{baseSepolia.name}</strong></p>
             <p><span>Token mode</span><strong>{tokenLabel(invoice.token)}</strong></p>
+            <p><span>Token contract</span><strong>{shortAddress(invoice.tokenAddress || tokenAddress(invoice.token))}</strong></p>
           </div>
           <PayerAction invoice={invoice} status={status} onPay={recordEncryptedPayment} />
           {receiptUrl && (
@@ -195,15 +195,15 @@ function PrivyPayerAction({
   }
 
   async function payWithPrivyWallet() {
-    const fherc20Address = getFherc20Address();
+    const selectedTokenAddress = invoice.tokenAddress || tokenAddress(invoice.token);
 
     if (!wallet?.address) {
       setError("Wallet is still being prepared. Try again in a moment.");
       return;
     }
 
-    if (!fherc20Address) {
-      setError("Missing NEXT_PUBLIC_FHERC20_ADDRESS. Add a deployed FHERC20 token address before testing real payments.");
+    if (!isAddress(selectedTokenAddress)) {
+      setError("This invoice does not include a valid FHERC20 token address.");
       return;
     }
 
@@ -223,9 +223,15 @@ function PrivyPayerAction({
       const payerLabel = user?.email?.address || (rail === "connected-wallet" ? "Connected wallet payer" : "Privy email payer");
       const provider = await wallet.getEthereumProvider();
       const clients = createBrowserPaymentClients(provider, payerAddress);
+      const tokenMetadata = await readFherc20Metadata(selectedTokenAddress);
+
+      if (!tokenMetadata.isFherc20) {
+        throw new Error("Selected invoice token is not an FHERC20 contract.");
+      }
+
       const encryptedAmount = await encryptInvoiceAmount({
         amount: invoice.amount,
-        decimals: tokenDecimals(invoice.token),
+        decimals: tokenMetadata.decimals,
         clients,
       });
       const data = encodeFherc20TransferCalldata({
@@ -234,7 +240,7 @@ function PrivyPayerAction({
       });
       const txHash = await clients.walletClient.sendTransaction({
         account: payerAddress,
-        to: fherc20Address,
+        to: selectedTokenAddress as Address,
         data,
       });
 
@@ -260,9 +266,7 @@ function PrivyPayerAction({
         onClick={payWithPrivyWallet}
       >
         {pending
-          ? isFherc20Ready()
-            ? "Encrypting and signing..."
-            : "Configure FHERC20 token"
+          ? "Encrypting and signing..."
           : status === "paid"
             ? "Payment recorded"
             : `Pay ${invoice.amount} ${invoice.token}`}
