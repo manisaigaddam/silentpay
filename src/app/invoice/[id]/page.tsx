@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { usePrivy, useSendTransaction, useWallets } from "@privy-io/react-auth";
-import { isAddress, type Address } from "viem";
+import { isAddress, numberToHex, type Address } from "viem";
 import { createBrowserPaymentClients } from "@/lib/browser-wallet";
 import { readFherc20Metadata } from "@/lib/chain-history";
 import {
@@ -32,6 +32,10 @@ interface PaymentCompletion {
   rail: PaymentRail;
   txHash: string;
   paymentCipher: PrivacyEnvelope;
+}
+
+interface Eip1193Provider {
+  request(args: { method: string; params?: unknown[] }): Promise<unknown>;
 }
 
 export default function InvoicePage() {
@@ -201,6 +205,7 @@ function PrivyPayerAction({
       const walletType = (wallet as { walletClientType?: string }).walletClientType || "";
       const rail: PaymentRail = walletType.startsWith("privy") ? "privy-email-wallet" : "connected-wallet";
       const payerLabel = user?.email?.address || (rail === "connected-wallet" ? "Connected wallet payer" : "Privy email payer");
+      await ensureBaseSepolia(wallet);
       const provider = await wallet.getEthereumProvider();
       const clients = createBrowserPaymentClients(provider, payerAddress);
       const tokenMetadata = await readFherc20Metadata(selectedTokenAddress);
@@ -223,19 +228,30 @@ function PrivyPayerAction({
         to: selectedTokenAddress as Address,
         data,
       }).catch(() => undefined);
-      const { hash: txHash } = await sendTransaction(
-        {
-          chainId: baseSepolia.id,
-          from: payerAddress,
-          to: selectedTokenAddress,
-          data,
-          ...(estimatedGas ? { gasLimit: (estimatedGas * 12n) / 10n } : {}),
-        },
-        {
-          address: payerAddress,
-          uiOptions: { showWalletUIs: false },
-        },
-      );
+      const gasLimit = estimatedGas ? (estimatedGas * 12n) / 10n : undefined;
+      const txHash = isPrivyEmbeddedWallet(walletType)
+        ? (await sendTransaction(
+            {
+              chainId: baseSepolia.id,
+              from: payerAddress,
+              to: selectedTokenAddress,
+              data,
+              ...(gasLimit ? { gasLimit } : {}),
+            },
+            {
+              uiOptions: {
+                showWalletUIs: true,
+                description: `Pay ${invoice.amount} ${invoice.token} privately with SilentPay.`,
+                buttonText: "Confirm payment",
+              },
+            },
+          )).hash
+        : await sendConnectedWalletTransaction(provider as Eip1193Provider, {
+            from: payerAddress,
+            to: selectedTokenAddress as Address,
+            data,
+            gasLimit,
+          });
 
       onPay({
         payerAddress,
@@ -270,4 +286,58 @@ function PrivyPayerAction({
       {error && <p className="tiny error-text">{error}</p>}
     </>
   );
+}
+
+function isPrivyEmbeddedWallet(walletClientType: string) {
+  return walletClientType === "privy" || walletClientType === "privy-v2";
+}
+
+async function ensureBaseSepolia(wallet: {
+  chainId?: string;
+  switchChain: (targetChainId: number) => Promise<void>;
+}) {
+  if (isBaseSepoliaChainId(wallet.chainId)) return;
+
+  try {
+    await wallet.switchChain(baseSepolia.id);
+  } catch (error) {
+    throw new Error(
+      error instanceof Error
+        ? `Switch your wallet to ${baseSepolia.name} and try again. ${error.message}`
+        : `Switch your wallet to ${baseSepolia.name} and try again.`,
+    );
+  }
+}
+
+function isBaseSepoliaChainId(chainId?: string) {
+  if (!chainId) return false;
+  return chainId === String(baseSepolia.id)
+    || chainId.toLowerCase() === numberToHex(baseSepolia.id)
+    || chainId.toLowerCase() === `eip155:${baseSepolia.id}`;
+}
+
+async function sendConnectedWalletTransaction(
+  provider: Eip1193Provider,
+  tx: {
+    from: Address;
+    to: Address;
+    data: `0x${string}`;
+    gasLimit?: bigint;
+  },
+) {
+  const hash = await provider.request({
+    method: "eth_sendTransaction",
+    params: [{
+      from: tx.from,
+      to: tx.to,
+      data: tx.data,
+      ...(tx.gasLimit ? { gas: numberToHex(tx.gasLimit) } : {}),
+    }],
+  });
+
+  if (typeof hash !== "string" || !hash.startsWith("0x")) {
+    throw new Error("Wallet did not return a transaction hash.");
+  }
+
+  return hash as `0x${string}`;
 }

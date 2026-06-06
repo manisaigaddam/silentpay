@@ -14,11 +14,11 @@ export interface Fherc20Token {
 export const supportedTokens = [
   {
     symbol: "eUSDC",
-    name: "FHERC20 Wrapped mockUSDC",
-    address: "0x0f3521fFe4246fA4285ea989155A7e4607C55f17",
+    name: "FHERC20 Confidential USDC",
+    address: "0x5DbFa80261B5D2b4A20cFAAE4e2a994040911393",
     underlying: "mockUSDC",
     decimals: 6,
-    faucetNote: "Get or mint mockUSDC through Redact/zOrbital resources, then shield it into eUSDC.",
+    faucetNote: "Get Base Sepolia ETH, then use Redact to shield USDC into confidential eUSDC.",
   },
   {
     symbol: "eUSDT",

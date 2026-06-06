@@ -122,38 +122,35 @@ export async function readChainHistory(account?: string): Promise<ChainHistory> 
   const toBlock = await client.getBlockNumber();
   const normalizedAccount = account && isAddress(account) ? (account as Address) : undefined;
 
-  const [invoiceEvents, tokenPaymentGroups] = await Promise.all([
-    invoiceContract
-      ? readContractEventsInChunks(client, {
-          address: invoiceContract,
-          abi: silentPayEventsAbi,
-          eventName: "InvoiceCreated",
-          args: normalizedAccount ? { merchant: normalizedAccount } : undefined,
-        }, fromBlock, toBlock) as Promise<DecodedInvoiceCreatedEvent[]>
-      : Promise.resolve([]),
-    normalizedAccount
-      ? Promise.all(
-          supportedTokens.map(async token => {
-            const [sent, received] = await Promise.all([
-              readContractEventsInChunks(client, {
-                address: token.address,
-                abi: fherc20EventsAbi,
-                eventName: "EncTransfer",
-                args: { from: normalizedAccount },
-              }, fromBlock, toBlock) as Promise<DecodedEncTransferEvent[]>,
-              readContractEventsInChunks(client, {
-                address: token.address,
-                abi: fherc20EventsAbi,
-                eventName: "EncTransfer",
-                args: { to: normalizedAccount },
-              }, fromBlock, toBlock) as Promise<DecodedEncTransferEvent[]>,
-            ]);
+  const invoiceEvents = invoiceContract
+    ? await readContractEventsInChunks(client, {
+        address: invoiceContract,
+        abi: silentPayEventsAbi,
+        eventName: "InvoiceCreated",
+        args: normalizedAccount ? { merchant: normalizedAccount } : undefined,
+      }, fromBlock, toBlock) as DecodedInvoiceCreatedEvent[]
+    : [];
 
-            return { token, events: [...sent, ...received] };
-          }),
-        )
-      : Promise.resolve([]),
-  ]);
+  const tokenPaymentGroups = [];
+
+  if (normalizedAccount) {
+    for (const token of supportedTokens) {
+      const sent = await readContractEventsInChunks(client, {
+        address: token.address,
+        abi: fherc20EventsAbi,
+        eventName: "EncTransfer",
+        args: { from: normalizedAccount },
+      }, fromBlock, toBlock) as DecodedEncTransferEvent[];
+      const received = await readContractEventsInChunks(client, {
+        address: token.address,
+        abi: fherc20EventsAbi,
+        eventName: "EncTransfer",
+        args: { to: normalizedAccount },
+      }, fromBlock, toBlock) as DecodedEncTransferEvent[];
+
+      tokenPaymentGroups.push({ token, events: [...sent, ...received] });
+    }
+  }
 
   return {
     invoices: invoiceEvents
@@ -192,12 +189,12 @@ export async function readFherc20Metadata(address: string): Promise<Fherc20Metad
 
   const client = createSilentPayPublicClient();
   const tokenAddress = address as Address;
-  const [isFherc20, name, symbol, decimals, balanceOfIsIndicator, indicatorTick] = await Promise.all([
+  const [isFherc20Result, name, symbol, decimals, balanceOfIsIndicator, indicatorTick] = await Promise.all([
     client.readContract({
       address: tokenAddress,
       abi: fherc20EventsAbi,
       functionName: "isFherc20",
-    }),
+    }).catch(() => null),
     client.readContract({
       address: tokenAddress,
       abi: fherc20EventsAbi,
@@ -227,7 +224,7 @@ export async function readFherc20Metadata(address: string): Promise<Fherc20Metad
 
   return {
     address: tokenAddress,
-    isFherc20,
+    isFherc20: isFherc20Result ?? (balanceOfIsIndicator && symbol.toLowerCase().startsWith("e")),
     name,
     symbol,
     decimals: Number(decimals),
@@ -292,7 +289,8 @@ async function resolveFromBlock(client: ReturnType<typeof createSilentPayPublicC
   if (configured && /^\d+$/.test(configured)) return BigInt(configured);
 
   const current = await client.getBlockNumber();
-  const scanWindow = BigInt(process.env.NEXT_PUBLIC_SILENTPAY_SCAN_BLOCKS || "100000");
+  const requestedScanWindow = BigInt(process.env.NEXT_PUBLIC_SILENTPAY_SCAN_BLOCKS || "1800");
+  const scanWindow = requestedScanWindow > 1800n ? 1800n : requestedScanWindow;
   return current > scanWindow ? current - scanWindow : 0n;
 }
 
@@ -303,10 +301,13 @@ async function readContractEventsInChunks(
   toBlock: bigint,
 ) {
   const events: unknown[] = [];
-  const chunkSize = BigInt(process.env.NEXT_PUBLIC_SILENTPAY_EVENT_CHUNK_SIZE || "1900");
+  const chunkSize = BigInt(process.env.NEXT_PUBLIC_SILENTPAY_EVENT_CHUNK_SIZE || "900");
 
   for (let start = fromBlock; start <= toBlock; start += chunkSize + 1n) {
     const end = start + chunkSize > toBlock ? toBlock : start + chunkSize;
+    if (events.length || start > fromBlock) {
+      await wait(175);
+    }
     const chunk = await client.getContractEvents({
       ...params,
       fromBlock: start,
@@ -316,4 +317,8 @@ async function readContractEventsInChunks(
   }
 
   return events;
+}
+
+function wait(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }

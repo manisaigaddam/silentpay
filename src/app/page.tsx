@@ -777,7 +777,7 @@ function ChainHistoryPanelInner() {
       setError("");
       setHistory(await readChainHistory(account));
     } catch (historyError) {
-      setError(historyError instanceof Error ? historyError.message : "Could not read blockchain history.");
+      setError(formatChainHistoryError(historyError));
     } finally {
       setLoading(false);
     }
@@ -828,6 +828,20 @@ function ChainHistoryPanelInner() {
       </div>
     </div>
   );
+}
+
+function formatChainHistoryError(error: unknown) {
+  const message = error instanceof Error ? error.message : "";
+
+  if (message.toLowerCase().includes("rate limit")) {
+    return "Base public RPC rate-limited this scan. Try refresh again, or use an Alchemy/QuickNode Base Sepolia RPC URL for reliable history.";
+  }
+
+  if (message.toLowerCase().includes("max block range")) {
+    return "The RPC rejected a wide log scan. Set NEXT_PUBLIC_SILENTPAY_FROM_BLOCK to your invoice contract deployment block.";
+  }
+
+  return "Could not read blockchain history from the current RPC.";
 }
 
 function ActivityDetailsPanel() {
