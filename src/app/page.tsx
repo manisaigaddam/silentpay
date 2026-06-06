@@ -44,6 +44,11 @@ const defaultMerchant = {
 
 type DashboardTab = "create" | "activity" | "tokens";
 
+interface RecentInvoiceRecord {
+  invoice: SilentInvoice;
+  link: string;
+}
+
 export default function Home() {
   const [mounted, setMounted] = useState(false);
   const [form, setForm] = useState(defaultMerchant);
@@ -51,8 +56,10 @@ export default function Home() {
   const [lastInvoice, setLastInvoice] = useState<SilentInvoice | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [copied, setCopied] = useState(false);
+  const [copiedInvoiceId, setCopiedInvoiceId] = useState("");
   const [activeTab, setActiveTab] = useState<DashboardTab>("create");
   const [origin, setOrigin] = useState("");
+  const [recentInvoices, setRecentInvoices] = useState<RecentInvoiceRecord[]>([]);
 
   useEffect(() => {
     setMounted(true);
@@ -103,12 +110,27 @@ export default function Home() {
     setLastLink("");
     setQrDataUrl("");
     setLastInvoice(invoice);
+    upsertRecentInvoice(invoice, "");
   }
 
   async function copyLink(value: string) {
     await navigator.clipboard.writeText(value);
     setCopied(true);
     setTimeout(() => setCopied(false), 1800);
+  }
+
+  async function copyInvoiceLink(invoiceId: string, link: string) {
+    if (!link) return;
+    await navigator.clipboard.writeText(link);
+    setCopiedInvoiceId(invoiceId);
+    setTimeout(() => setCopiedInvoiceId(""), 1800);
+  }
+
+  function upsertRecentInvoice(invoice: SilentInvoice, link: string) {
+    setRecentInvoices(current => [
+      { invoice, link },
+      ...current.filter(record => record.invoice.id !== invoice.id),
+    ].slice(0, 10));
   }
 
   if (!mounted) {
@@ -208,6 +230,7 @@ export default function Home() {
                     const nextLink = invoiceLink(origin || window.location.origin, invoice);
                     setLastInvoice(invoice);
                     setLastLink(nextLink);
+                    upsertRecentInvoice(invoice, nextLink);
                   }}
                 />
               )}
@@ -245,8 +268,13 @@ export default function Home() {
 
       {activeTab === "activity" && (
       <section className="section-grid">
+        <CreatedInvoicesPanel
+          copiedInvoiceId={copiedInvoiceId}
+          invoices={recentInvoices}
+          origin={origin}
+          onCopy={copyInvoiceLink}
+        />
         <ChainHistoryPanel />
-        <ActivityDetailsPanel />
       </section>
       )}
 
@@ -631,6 +659,89 @@ function ChainStatsInner() {
   );
 }
 
+function CreatedInvoicesPanel({
+  invoices,
+  origin,
+  copiedInvoiceId,
+  onCopy,
+}: {
+  invoices: RecentInvoiceRecord[];
+  origin: string;
+  copiedInvoiceId: string;
+  onCopy: (invoiceId: string, link: string) => void;
+}) {
+  return (
+    <div className="panel">
+      <div className="section-heading">
+        <p className="eyebrow">Generated invoices</p>
+        <h2>Links and QR for this session</h2>
+      </div>
+      {invoices.length ? (
+        <div className="invoice-list">
+          {invoices.map(record => {
+            const registered = Boolean(record.link);
+            const shortLink = `${origin || "https://silentpay"}/invoice/${record.invoice.id}#private`;
+
+            return (
+              <div className="invoice-row" key={record.invoice.id}>
+                <div className="invoice-qr">
+                  {registered ? <InvoiceQr link={record.link} /> : <span>FHE</span>}
+                </div>
+                <div className="invoice-main">
+                  <div>
+                    <strong>{record.invoice.title}</strong>
+                    <small>{record.invoice.amount} {record.invoice.token} to {shortAddress(record.invoice.merchantAddress)}</small>
+                  </div>
+                  <code>{registered ? shortLink : "Encrypt and register this invoice before sharing."}</code>
+                  <div className="button-row">
+                    <button className="secondary-button" disabled={!registered} onClick={() => onCopy(record.invoice.id, record.link)}>
+                      {copiedInvoiceId === record.invoice.id ? "Copied" : "Copy link"}
+                    </button>
+                    {registered ? (
+                      <a className="primary-button" href={record.link} target="_blank" rel="noreferrer">Open checkout</a>
+                    ) : (
+                      <button className="primary-button" disabled>Awaiting FHE registration</button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="empty-state compact-empty">
+          <span className="ghost-icon">#</span>
+          <p>Generated invoice links appear here after you create them in this browser session.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InvoiceQr({ link }: { link: string }) {
+  const [qrDataUrl, setQrDataUrl] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    QRCode.toDataURL(link, {
+      width: 128,
+      margin: 1,
+      color: {
+        dark: "#050505",
+        light: "#ffffff",
+      },
+    }).then(url => {
+      if (active) setQrDataUrl(url);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [link]);
+
+  return qrDataUrl ? <img alt="Invoice QR" src={qrDataUrl} /> : <span>QR</span>;
+}
+
 function ChainHistoryPanel() {
   if (!hasPrivy) {
     return (
@@ -787,8 +898,11 @@ function WalletTokenPanelInner() {
     <div className="panel">
       <div className="section-heading">
         <p className="eyebrow">Wallet</p>
-        <h2>Confidential token balances</h2>
+        <h2>FHERC20 activity indicators</h2>
       </div>
+      <p className="muted-text">
+        SilentPay settles with confidential token contracts. These indicators prove activity, but they are not the real encrypted balance.
+      </p>
       <button className="secondary-button full-width" disabled={loading} onClick={refreshBalances}>
         {loading ? "Reading balances..." : authenticated ? "Refresh balances" : "Sign in to read balances"}
       </button>
@@ -820,8 +934,11 @@ function TokenRegistryPanel() {
     <div className="panel">
       <div className="section-heading">
         <p className="eyebrow">Settlement assets</p>
-        <h2>FHERC20 tokens</h2>
+        <h2>Encrypted token rails</h2>
       </div>
+      <p className="muted-text">
+        Payers first shield public test tokens into these FHERC20 contracts, then SilentPay sends encrypted amounts through `encTransfer`.
+      </p>
       <div className="mini-list">
         {supportedTokens.map(token => (
           <div className="mini-row token-row" key={token.address}>

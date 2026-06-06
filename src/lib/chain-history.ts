@@ -86,6 +86,26 @@ export interface Fherc20MetadataRecord {
   indicatorTick: bigint | null;
 }
 
+interface DecodedInvoiceCreatedEvent {
+  args: {
+    invoiceId?: `0x${string}`;
+    invoiceHash?: `0x${string}`;
+    merchant?: Address;
+  };
+  transactionHash: `0x${string}`;
+  blockNumber: bigint;
+}
+
+interface DecodedEncTransferEvent {
+  args: {
+    from?: Address;
+    to?: Address;
+    evalue?: `0x${string}`;
+  };
+  transactionHash: `0x${string}`;
+  blockNumber: bigint;
+}
+
 export function createSilentPayPublicClient() {
   const rpcUrl = process.env.NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL || baseSepolia.rpcUrl;
 
@@ -99,36 +119,34 @@ export async function readChainHistory(account?: string): Promise<ChainHistory> 
   const client = createSilentPayPublicClient();
   const invoiceContract = getSilentPayContractAddress();
   const fromBlock = await resolveFromBlock(client);
+  const toBlock = await client.getBlockNumber();
   const normalizedAccount = account && isAddress(account) ? (account as Address) : undefined;
 
   const [invoiceEvents, tokenPaymentGroups] = await Promise.all([
     invoiceContract
-      ? client.getContractEvents({
+      ? readContractEventsInChunks(client, {
           address: invoiceContract,
           abi: silentPayEventsAbi,
           eventName: "InvoiceCreated",
           args: normalizedAccount ? { merchant: normalizedAccount } : undefined,
-          fromBlock,
-        })
+        }, fromBlock, toBlock) as Promise<DecodedInvoiceCreatedEvent[]>
       : Promise.resolve([]),
     normalizedAccount
       ? Promise.all(
           supportedTokens.map(async token => {
             const [sent, received] = await Promise.all([
-              client.getContractEvents({
+              readContractEventsInChunks(client, {
                 address: token.address,
                 abi: fherc20EventsAbi,
                 eventName: "EncTransfer",
                 args: { from: normalizedAccount },
-                fromBlock,
-              }),
-              client.getContractEvents({
+              }, fromBlock, toBlock) as Promise<DecodedEncTransferEvent[]>,
+              readContractEventsInChunks(client, {
                 address: token.address,
                 abi: fherc20EventsAbi,
                 eventName: "EncTransfer",
                 args: { to: normalizedAccount },
-                fromBlock,
-              }),
+              }, fromBlock, toBlock) as Promise<DecodedEncTransferEvent[]>,
             ]);
 
             return { token, events: [...sent, ...received] };
@@ -276,4 +294,26 @@ async function resolveFromBlock(client: ReturnType<typeof createSilentPayPublicC
   const current = await client.getBlockNumber();
   const scanWindow = BigInt(process.env.NEXT_PUBLIC_SILENTPAY_SCAN_BLOCKS || "100000");
   return current > scanWindow ? current - scanWindow : 0n;
+}
+
+async function readContractEventsInChunks(
+  client: ReturnType<typeof createSilentPayPublicClient>,
+  params: Omit<Parameters<ReturnType<typeof createSilentPayPublicClient>["getContractEvents"]>[0], "fromBlock" | "toBlock">,
+  fromBlock: bigint,
+  toBlock: bigint,
+) {
+  const events: unknown[] = [];
+  const chunkSize = BigInt(process.env.NEXT_PUBLIC_SILENTPAY_EVENT_CHUNK_SIZE || "1900");
+
+  for (let start = fromBlock; start <= toBlock; start += chunkSize + 1n) {
+    const end = start + chunkSize > toBlock ? toBlock : start + chunkSize;
+    const chunk = await client.getContractEvents({
+      ...params,
+      fromBlock: start,
+      toBlock: end,
+    } as Parameters<typeof client.getContractEvents>[0]);
+    events.push(...chunk);
+  }
+
+  return events;
 }
