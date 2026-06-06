@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usePrivy, useWallets } from "@privy-io/react-auth";
+import { usePrivy, useSendTransaction, useWallets } from "@privy-io/react-auth";
 import { isAddress, type Address } from "viem";
 import { createBrowserPaymentClients } from "@/lib/browser-wallet";
 import { readFherc20Metadata } from "@/lib/chain-history";
@@ -14,7 +14,6 @@ import {
   baseSepolia,
   createId,
   decodeInvoicePayload,
-  invoiceLink,
   PaymentRail,
   PrivacyEnvelope,
   receiptLink,
@@ -39,14 +38,12 @@ export default function InvoicePage() {
   const [invoice, setInvoice] = useState<SilentInvoice | null>(null);
   const [status, setStatus] = useState<CheckoutStatus>("idle");
   const [receiptUrl, setReceiptUrl] = useState("");
-  const [origin, setOrigin] = useState("");
 
   useEffect(() => {
     const payload = decodeInvoicePayload(window.location.hash);
     if (payload?.invoice) {
       setInvoice(payload.invoice);
     }
-    setOrigin(window.location.origin);
   }, []);
 
   function recordEncryptedPayment(payment: PaymentCompletion) {
@@ -83,7 +80,7 @@ export default function InvoicePage() {
           <p className="eyebrow">Missing private payload</p>
           <h1>Invoice details are not available.</h1>
           <p className="muted-text">
-            SilentPay links carry private invoice data in the URL fragment. Open the full link shared by the merchant.
+            Open the full private checkout link shared by the invoice creator.
           </p>
           <a className="secondary-button" href="/">Back to dashboard</a>
         </div>
@@ -101,7 +98,7 @@ export default function InvoicePage() {
         </span>
       </a>
 
-      <section className="checkout-grid">
+      <section className="checkout-grid single-checkout">
         <div className="panel checkout-card">
           <p className="eyebrow">Invoice {invoice.id}</p>
           <h1>{invoice.title}</h1>
@@ -111,8 +108,8 @@ export default function InvoicePage() {
             <strong>{invoice.token}</strong>
           </div>
           <div className="detail-list">
-            <p><span>Merchant</span><strong>{invoice.merchantName}</strong></p>
-            <p><span>Settlement</span><strong>{shortAddress(invoice.merchantAddress)}</strong></p>
+            <p><span>Recipient</span><strong>{invoice.merchantName}</strong></p>
+            <p><span>Receiving wallet</span><strong>{shortAddress(invoice.merchantAddress)}</strong></p>
             <p><span>Network</span><strong>{baseSepolia.name}</strong></p>
             <p><span>Token mode</span><strong>{tokenLabel(invoice.token)}</strong></p>
             <p><span>Token contract</span><strong>{shortAddress(invoice.tokenAddress || tokenAddress(invoice.token))}</strong></p>
@@ -124,24 +121,6 @@ export default function InvoicePage() {
               <a className="primary-button" href={receiptUrl}>Open receipt</a>
             </div>
           )}
-        </div>
-
-        <div className="panel">
-          <p className="eyebrow">Under the hood</p>
-          <h2>Where FHE happens</h2>
-          <ol className="underhood-list">
-            <li>SilentPay resolves the private invoice payload in the checkout page.</li>
-            <li>The page encrypts the payment amount with CoFHE before any transaction is signed.</li>
-            <li>The payer signs one FHERC20 encrypted transfer to the merchant.</li>
-            <li>The explorer sees an indicated token movement and ciphertext handle, not the real amount.</li>
-          </ol>
-          <pre className="code-block">{`FHERC20.encTransfer(
-  merchant,
-  { ctHash, securityZone, utype, signature }
-)`}</pre>
-          <a className="secondary-button full-width" href={origin ? invoiceLink(origin, invoice) : `/invoice/${invoice.id}`}>
-            Copy-safe invoice route
-          </a>
         </div>
       </section>
     </main>
@@ -181,6 +160,7 @@ function PrivyPayerAction({
   onPay: (payment: PaymentCompletion) => void;
 }) {
   const { ready, authenticated, login, user } = usePrivy();
+  const { sendTransaction } = useSendTransaction();
   const { wallets } = useWallets();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
@@ -208,7 +188,7 @@ function PrivyPayerAction({
     }
 
     if (!isAddress(invoice.merchantAddress)) {
-      setError("Merchant settlement address is not a valid EVM address.");
+      setError("Receiving wallet is not a valid EVM address.");
       return;
     }
 
@@ -238,11 +218,24 @@ function PrivyPayerAction({
         merchantAddress,
         encryptedAmount,
       });
-      const txHash = await clients.walletClient.sendTransaction({
+      const estimatedGas = await clients.publicClient.estimateGas({
         account: payerAddress,
         to: selectedTokenAddress as Address,
         data,
-      });
+      }).catch(() => undefined);
+      const { hash: txHash } = await sendTransaction(
+        {
+          chainId: baseSepolia.id,
+          from: payerAddress,
+          to: selectedTokenAddress,
+          data,
+          ...(estimatedGas ? { gasLimit: (estimatedGas * 12n) / 10n } : {}),
+        },
+        {
+          address: payerAddress,
+          uiOptions: { showWalletUIs: false },
+        },
+      );
 
       onPay({
         payerAddress,

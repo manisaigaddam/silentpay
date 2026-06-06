@@ -56,6 +56,22 @@ export interface ReceiptPayload {
   receipt: SilentReceipt;
 }
 
+interface CompactInvoicePayload {
+  v: 1;
+  i: {
+    id: string;
+    n: string;
+    a: string;
+    t: string;
+    m: string;
+    q: string;
+    k: TokenSymbol;
+    c: string;
+    e: string;
+    d: string;
+  };
+}
+
 export const baseSepolia = {
   id: 84532,
   name: "Base Sepolia",
@@ -86,11 +102,65 @@ export function createPrivacyEnvelope(value: string, purpose: string): PrivacyEn
 }
 
 export function encodeInvoicePayload(invoice: SilentInvoice) {
-  return encodeBase64Url(JSON.stringify({ version: 1, invoice } satisfies InvoicePayload));
+  const compactPayload: CompactInvoicePayload = {
+    v: 1,
+    i: {
+      id: invoice.id,
+      n: invoice.merchantName,
+      a: invoice.merchantAddress,
+      t: invoice.title,
+      m: invoice.memo,
+      q: invoice.amount,
+      k: invoice.token,
+      c: invoice.tokenAddress,
+      e: invoice.expiresAt,
+      d: invoice.createdAt,
+    },
+  };
+
+  return encodeBase64Url(JSON.stringify(compactPayload));
 }
 
 export function decodeInvoicePayload(hash: string): InvoicePayload | null {
-  return decodePayload<InvoicePayload>(hash, 1);
+  const cleaned = hash.replace(/^#/, "").trim();
+  if (!cleaned) return null;
+
+  try {
+    const parsed = JSON.parse(decodeBase64Url(cleaned)) as InvoicePayload | CompactInvoicePayload;
+
+    if ("version" in parsed && parsed.version === 1) {
+      return parsed;
+    }
+
+    if ("v" in parsed && parsed.v === 1) {
+      return {
+        version: 1,
+        invoice: {
+          id: parsed.i.id,
+          merchantName: parsed.i.n,
+          merchantAddress: parsed.i.a,
+          title: parsed.i.t,
+          memo: parsed.i.m,
+          amount: parsed.i.q,
+          token: parsed.i.k,
+          tokenAddress: parsed.i.c,
+          expiresAt: parsed.i.e,
+          createdAt: parsed.i.d,
+          status: "open",
+          expectedAmountCipher: {
+            kind: "cofhe-encrypted-input",
+            handle: "0x0000000000000000000000000000000000000000000000000000000000000000",
+            verifierSignature: "0x",
+            note: "Invoice was registered onchain. Compact checkout links omit the encrypted invoice envelope.",
+          },
+        },
+      };
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
 }
 
 export function encodeReceiptPayload(receipt: SilentReceipt) {

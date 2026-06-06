@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { usePrivy, useWallets } from "@privy-io/react-auth";
+import { usePrivy, useSendTransaction, useWallets } from "@privy-io/react-auth";
 import QRCode from "qrcode";
 import type { Address } from "viem";
 import { createBrowserPaymentClients } from "@/lib/browser-wallet";
@@ -34,13 +34,15 @@ import { supportedTokens, tokenAddress, type TokenSymbol } from "@/lib/tokens";
 const hasPrivy = Boolean(process.env.NEXT_PUBLIC_PRIVY_APP_ID);
 
 const defaultMerchant = {
-  merchantName: "SilentPay Merchant",
+  merchantName: "SilentPay User",
   merchantAddress: "",
   title: "Private invoice",
-  memo: "Order details visible only to the payer and merchant.",
+  memo: "Order details visible only to the people involved.",
   amount: "12.50",
   token: "eUSDC" as TokenSymbol,
 };
+
+type DashboardTab = "create" | "activity" | "tokens";
 
 export default function Home() {
   const [mounted, setMounted] = useState(false);
@@ -49,9 +51,12 @@ export default function Home() {
   const [lastInvoice, setLastInvoice] = useState<SilentInvoice | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState("");
   const [copied, setCopied] = useState(false);
+  const [activeTab, setActiveTab] = useState<DashboardTab>("create");
+  const [origin, setOrigin] = useState("");
 
   useEffect(() => {
     setMounted(true);
+    setOrigin(window.location.origin);
   }, []);
 
   const lastInvoiceRegistered = lastInvoice?.expectedAmountCipher.kind === "cofhe-encrypted-input";
@@ -95,8 +100,8 @@ export default function Home() {
       expectedAmountCipher: createPrivacyEnvelope(`${form.amount}:${form.token}`, "invoice-expected-amount"),
     };
 
-    const link = invoiceLink(window.location.origin, invoice);
-    setLastLink(link);
+    setLastLink("");
+    setQrDataUrl("");
     setLastInvoice(invoice);
   }
 
@@ -125,15 +130,15 @@ export default function Home() {
 
       <section className="hero-grid">
         <div className="hero-copy">
-          <p className="eyebrow">Base Sepolia / Fhenix-ready / Privy onboarding</p>
-          <h1>Private payment links for confidential onchain checkout.</h1>
+          <p className="eyebrow">FHE payment links on Base Sepolia</p>
+          <h1>Create private payment links.</h1>
           <p>
-            SilentPay lets merchants issue confidential invoices and lets payers complete them from one link or QR.
-            Invoice details, payment amounts, and receipts stay readable only to the parties involved.
+            SilentPay registers encrypted invoice amounts with Fhenix CoFHE, then lets the payer settle through a
+            confidential FHERC20 transfer from one checkout link or QR.
           </p>
           <div className="hero-actions">
-            <a href="#create" className="primary-button">Create invoice</a>
-            <a href="#developer" className="secondary-button">View protocol flow</a>
+            <button className="primary-button" onClick={() => setActiveTab("create")}>New invoice</button>
+            <button className="secondary-button" onClick={() => setActiveTab("activity")}>Activity</button>
           </div>
         </div>
         <div className="signal-panel">
@@ -142,19 +147,22 @@ export default function Home() {
         </div>
       </section>
 
+      <DashboardTabs activeTab={activeTab} onChange={setActiveTab} />
+
+      {activeTab === "create" && (
       <section className="section-grid" id="create">
         <div className="panel create-panel">
           <div className="section-heading">
-            <p className="eyebrow">Merchant</p>
-            <h2>Create a private invoice</h2>
+            <p className="eyebrow">Create</p>
+            <h2>Register a private invoice</h2>
           </div>
           <div className="form-grid">
             <label>
-              Merchant name
+              Display name
               <input value={form.merchantName} onChange={event => setForm({ ...form, merchantName: event.target.value })} />
             </label>
             <label>
-              Merchant settlement address
+              Receiving wallet
               <MerchantSettlementField
                 value={form.merchantAddress}
                 onAddressChange={merchantAddress => setForm(current => ({ ...current, merchantAddress }))}
@@ -191,27 +199,35 @@ export default function Home() {
             <p className="eyebrow">Payment link</p>
             <h2>Checkout link and QR</h2>
           </div>
-          {lastLink ? (
+          {lastInvoice && !lastInvoiceRegistered ? (
+            <div className="link-result">
+              {hasPrivy && (
+                <OnchainRegisterPanel
+                  invoice={lastInvoice}
+                  onRegistered={invoice => {
+                    const nextLink = invoiceLink(origin || window.location.origin, invoice);
+                    setLastInvoice(invoice);
+                    setLastLink(nextLink);
+                  }}
+                />
+              )}
+              <div className="empty-state compact-empty">
+                <span className="ghost-icon">F</span>
+                <p>The QR and checkout link unlock only after CoFHE encrypts and registers this invoice.</p>
+              </div>
+            </div>
+          ) : lastLink ? (
             <div className="link-result">
               <div className="qr-box">
                 {qrDataUrl ? <img alt="SilentPay QR" src={qrDataUrl} /> : <span className="tiny">Preparing QR...</span>}
               </div>
-              <code>{lastLink}</code>
-              {lastInvoice && hasPrivy && (
-                <OnchainRegisterPanel
-                  invoice={lastInvoice}
-                  onRegistered={invoice => {
-                    setLastInvoice(invoice);
-                    setLastLink(invoiceLink(window.location.origin, invoice));
-                  }}
-                />
-              )}
+              <code>{lastInvoice ? `${origin || window.location.origin}/invoice/${lastInvoice.id}#private` : lastLink}</code>
               <div className="button-row">
                 <button className="secondary-button" disabled={!lastInvoiceRegistered} onClick={() => copyLink(lastLink)}>
                   {copied ? "Copied" : "Copy link"}
                 </button>
                 {lastInvoiceRegistered ? (
-                  <a className="primary-button" href={lastLink}>Open checkout</a>
+                  <a className="primary-button" href={lastLink} target="_blank" rel="noreferrer">Open checkout</a>
                 ) : (
                   <button className="primary-button" disabled>Register invoice first</button>
                 )}
@@ -220,38 +236,56 @@ export default function Home() {
           ) : (
             <div className="empty-state">
               <span className="ghost-icon">#</span>
-              <p>Create an invoice to get a QR and checkout link.</p>
+              <p>Create an invoice. SilentPay will show the link only after FHE registration succeeds.</p>
             </div>
           )}
         </div>
       </section>
+      )}
 
+      {activeTab === "activity" && (
       <section className="section-grid">
         <ChainHistoryPanel />
-        <PrivacyPanel />
+        <ActivityDetailsPanel />
       </section>
+      )}
 
-      <section className="panel developer-panel" id="developer">
-        <div className="section-heading">
-          <p className="eyebrow">Developer layer</p>
-          <h2>Integrate private checkout in any app</h2>
-        </div>
-        <div className="flow-grid">
-          <FlowStep index="01" title="Create" text="The merchant creates an invoice. Private metadata is sealed offchain; the contract stores only an invoice commitment and encrypted expected amount." />
-          <FlowStep index="02" title="Open" text="The payer opens a SilentPay checkout link or QR. Privy supports email onboarding or a connected wallet." />
-          <FlowStep index="03" title="Encrypt" text="The checkout page encrypts payment input with CoFHE and prepares calldata containing the ciphertext handle plus verifier signature." />
-          <FlowStep index="04" title="Settle" text="The payer signs one FHERC20 encrypted transfer to the merchant; the real amount remains confidential." />
-        </div>
-        <pre className="code-block">{`// Intended SDK shape
-const invoice = await silentpay.invoices.create({
-  amount: "12.50",
-  token: "eUSDC",
-  memo: "Private order #1842",
-});
-
-<SilentPayCheckout invoiceId={invoice.id} />`}</pre>
+      {activeTab === "tokens" && (
+      <section className="section-grid">
+        <WalletTokenPanel />
+        <TokenRegistryPanel />
       </section>
+      )}
     </main>
+  );
+}
+
+function DashboardTabs({
+  activeTab,
+  onChange,
+}: {
+  activeTab: DashboardTab;
+  onChange: (tab: DashboardTab) => void;
+}) {
+  const tabs: Array<{ id: DashboardTab; label: string }> = [
+    { id: "create", label: "Create" },
+    { id: "activity", label: "Activity" },
+    { id: "tokens", label: "Tokens" },
+  ];
+
+  return (
+    <nav className="tabbar" aria-label="SilentPay workspace">
+      {tabs.map(tab => (
+        <button
+          className={activeTab === tab.id ? "active" : ""}
+          key={tab.id}
+          onClick={() => onChange(tab.id)}
+          type="button"
+        >
+          {tab.label}
+        </button>
+      ))}
+    </nav>
   );
 }
 
@@ -439,6 +473,7 @@ function OnchainRegisterPanel({
   onRegistered: (invoice: SilentInvoice) => void;
 }) {
   const { ready, authenticated, login } = usePrivy();
+  const { sendTransaction } = useSendTransaction();
   const { wallets } = useWallets();
   const [status, setStatus] = useState<"idle" | "encrypting" | "registered" | "error">("idle");
   const [txHash, setTxHash] = useState("");
@@ -492,11 +527,24 @@ function OnchainRegisterPanel({
         encryptedExpectedAmount,
       });
 
-      const hash = await clients.walletClient.sendTransaction({
+      const estimatedGas = await clients.publicClient.estimateGas({
         account,
         to: contractAddress,
         data,
-      });
+      }).catch(() => undefined);
+      const { hash } = await sendTransaction(
+        {
+          chainId: baseSepolia.id,
+          from: account,
+          to: contractAddress,
+          data,
+          ...(estimatedGas ? { gasLimit: (estimatedGas * 12n) / 10n } : {}),
+        },
+        {
+          address: account,
+          uiOptions: { showWalletUIs: false },
+        },
+      );
 
       onRegistered({
         ...invoice,
@@ -591,7 +639,7 @@ function ChainHistoryPanel() {
           <p className="eyebrow">Blockchain history</p>
           <h2>Connect Privy to read live records</h2>
         </div>
-        <p className="muted-text">Add `NEXT_PUBLIC_PRIVY_APP_ID` so SilentPay can query records for the active merchant or payer.</p>
+        <p className="muted-text">Add `NEXT_PUBLIC_PRIVY_APP_ID` so SilentPay can query records for the active wallet.</p>
       </div>
     );
   }
@@ -637,7 +685,7 @@ function ChainHistoryPanelInner() {
         <h2>Live records for this wallet</h2>
       </div>
       <p className="muted-text">
-        SilentPay reads invoice events from your invoice contract and encrypted transfer events from the FHERC20 token.
+        SilentPay reads invoice events from your contract and encrypted transfer events from supported FHERC20 tokens.
       </p>
       <button className="secondary-button full-width" disabled={loading} onClick={refreshHistory}>
         {loading ? "Reading Base Sepolia..." : authenticated ? "Refresh from blockchain" : "Sign in to read history"}
@@ -664,50 +712,135 @@ function ChainHistoryPanelInner() {
             </a>
           ))
         ) : (
-          <p className="tiny">No onchain invoices found for this merchant wallet in the scan window.</p>
+          <p className="tiny">No onchain invoices found for this wallet in the scan window.</p>
         )}
       </div>
     </div>
   );
 }
 
-function PrivacyPanel() {
+function ActivityDetailsPanel() {
   return (
-    <div className="panel privacy-panel">
+    <div className="panel">
       <div className="section-heading">
-        <p className="eyebrow">Explorer view</p>
-        <h2>Public chain data vs private payment data</h2>
+        <p className="eyebrow">Private records</p>
+        <h2>Invoice and payment visibility</h2>
       </div>
-      <div className="privacy-columns">
-        <div>
-          <h3>Public</h3>
-          <ul>
-            <li>tx hash, block, gas</li>
-            <li>SilentPay contract address</li>
-            <li>ciphertext handles and verifier signatures</li>
-            <li>signer address unless embedded/abstracted</li>
-          </ul>
-        </div>
-        <div>
-          <h3>Private</h3>
-          <ul>
-            <li>amount and merchant balance</li>
-            <li>memo, item, receipt</li>
-            <li>payer payment history</li>
-            <li>merchant invoice analytics</li>
-          </ul>
-        </div>
+      <div className="detail-list">
+        <p><span>Created invoices</span><strong>commitment + encrypted amount</strong></p>
+        <p><span>Received payments</span><strong>sender + ciphertext handle</strong></p>
+        <p><span>Readable details</span><strong>checkout link or receipt link</strong></p>
+        <p><span>Manual decrypt</span><strong>future sealed-decryption action</strong></p>
       </div>
     </div>
   );
 }
 
-function FlowStep({ index, title, text }: { index: string; title: string; text: string }) {
+function WalletTokenPanel() {
+  if (!hasPrivy) {
+    return (
+      <div className="panel">
+        <div className="section-heading">
+          <p className="eyebrow">Balances</p>
+          <h2>Connect to read FHERC20 balances</h2>
+        </div>
+        <p className="muted-text">Add Privy configuration to read indicated balances for the active wallet.</p>
+      </div>
+    );
+  }
+
+  return <WalletTokenPanelInner />;
+}
+
+function WalletTokenPanelInner() {
+  const { authenticated, login } = usePrivy();
+  const { wallets } = useWallets();
+  const [balances, setBalances] = useState<TokenBalanceRecord[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const account = wallets[0]?.address;
+
+  async function refreshBalances() {
+    if (!authenticated) {
+      login();
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError("");
+      setBalances(await readTokenBalances(account));
+    } catch (balanceError) {
+      setError(balanceError instanceof Error ? balanceError.message : "Could not read token balances.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!authenticated || !account) return;
+    refreshBalances();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated, account]);
+
   return (
-    <div className="flow-step">
-      <span>{index}</span>
-      <h3>{title}</h3>
-      <p>{text}</p>
+    <div className="panel">
+      <div className="section-heading">
+        <p className="eyebrow">Wallet</p>
+        <h2>Confidential token balances</h2>
+      </div>
+      <button className="secondary-button full-width" disabled={loading} onClick={refreshBalances}>
+        {loading ? "Reading balances..." : authenticated ? "Refresh balances" : "Sign in to read balances"}
+      </button>
+      {error && <p className="tiny error-text">{error}</p>}
+      <div className="balance-list balance-list-spaced">
+        {balances.length ? (
+          balances.map(balance => (
+            <div className="balance-row" key={balance.address}>
+              <span>
+                <strong>{balance.symbol}</strong>
+                <small>{shortAddress(balance.address)}</small>
+              </span>
+              <span>
+                <strong>{balance.indicatedFormatted}</strong>
+                <small>{balance.encryptedHandle ? `${balance.encryptedHandle.slice(0, 8)}...${balance.encryptedHandle.slice(-6)}` : "No private handle"}</small>
+              </span>
+            </div>
+          ))
+        ) : (
+          <p className="tiny">No FHERC20 balance indicators found for this wallet.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TokenRegistryPanel() {
+  return (
+    <div className="panel">
+      <div className="section-heading">
+        <p className="eyebrow">Settlement assets</p>
+        <h2>FHERC20 tokens</h2>
+      </div>
+      <div className="mini-list">
+        {supportedTokens.map(token => (
+          <div className="mini-row token-row" key={token.address}>
+            <span>
+              <strong>{token.symbol}</strong>
+              <small>{token.name}</small>
+            </span>
+            <code>{shortAddress(token.address)}</code>
+          </div>
+        ))}
+      </div>
+      <div className="button-row faucet-row">
+        <a className="secondary-button" href="https://docs.base.org/tools/network-faucets" target="_blank" rel="noreferrer">
+          Base Sepolia ETH
+        </a>
+        <a className="secondary-button" href="https://test.redact.money/" target="_blank" rel="noreferrer">
+          Shield tokens
+        </a>
+      </div>
     </div>
   );
 }

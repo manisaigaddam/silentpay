@@ -281,6 +281,32 @@ button {
   margin-top: 28px;
 }
 
+.tabbar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 8px 0 24px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(16, 17, 20, 0.72);
+}
+
+.tabbar button {
+  min-height: 42px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.tabbar button.active {
+  border-color: rgba(255, 106, 61, 0.4);
+  background: rgba(255, 106, 61, 0.13);
+  color: var(--text);
+}
+
 .primary-button,
 .secondary-button {
   display: inline-flex;
@@ -478,6 +504,10 @@ code,
   text-align: center;
 }
 
+.compact-empty {
+  min-height: 170px;
+}
+
 .ghost-icon {
   display: grid;
   place-items: center;
@@ -504,6 +534,28 @@ code,
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.04);
+}
+
+.mini-row span,
+.token-row span {
+  min-width: 0;
+}
+
+.mini-row small,
+.token-row small {
+  display: block;
+  color: var(--muted);
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+}
+
+.token-row code {
+  white-space: nowrap;
+}
+
+.faucet-row,
+.balance-list-spaced {
+  margin-top: 16px;
 }
 
 .privacy-columns,
@@ -567,6 +619,11 @@ code,
 .checkout-grid {
   align-items: start;
   margin-top: 38px;
+}
+
+.single-checkout {
+  grid-template-columns: minmax(0, 720px);
+  justify-content: center;
 }
 
 .checkout-card h1,
@@ -727,5 +784,53 @@ code,
 
   .hero-copy {
     padding: 28px;
+  }
+
+  .hero-copy h1 {
+    font-size: clamp(40px, 13vw, 64px);
+  }
+
+  .signal-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-popover {
+    right: auto;
+    left: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .app-shell,
+  .checkout-shell {
+    width: min(100% - 20px, 1180px);
+    padding-bottom: 36px;
+  }
+
+  .hero-copy,
+  .panel {
+    padding: 20px;
+  }
+
+  .tabbar {
+    grid-template-columns: 1fr;
+  }
+
+  .amount-line {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .detail-list p,
+  .mini-row,
+  .balance-row,
+  .address-control {
+    grid-template-columns: 1fr;
+    display: grid;
+  }
+
+  .detail-list strong,
+  .balance-row > span:last-child {
+    text-align: left;
   }
 }
