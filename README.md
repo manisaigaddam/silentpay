@@ -20,7 +20,7 @@ This repo contains the production UI foundation for SilentPay:
 - `src/lib/silentpay.ts` - invoice/receipt model and URL payload helpers
 - `src/lib/fhenix-client.ts` - CoFHE encryption and SilentPay calldata helpers
 - `src/lib/browser-wallet.ts` - Privy/viem browser client setup
-- `contracts/SilentPayInvoices.sol` - first Fhenix encrypted invoice accounting contract
+- `contracts/contracts/SilentPayInvoices.sol` - first Fhenix encrypted invoice accounting contract
 
 The app expects real FHE configuration: Privy for identity/signing, a deployed SilentPay invoice contract, and an FHERC20 token address for confidential settlement.
 
@@ -39,8 +39,10 @@ NEXT_PUBLIC_PRIVY_APP_ID=your_privy_app_id
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 NEXT_PUBLIC_BASE_SEPOLIA_RPC_URL=https://sepolia.base.org
 NEXT_PUBLIC_SILENTPAY_CONTRACT_ADDRESS=0x...
-NEXT_PUBLIC_FHERC20_ADDRESS=0x...
+NEXT_PUBLIC_FHERC20_ADDRESS=0x0f3521fFe4246fA4285ea989155A7e4607C55f17
 NEXT_PUBLIC_COFHE_ENV=testnet
+NEXT_PUBLIC_SILENTPAY_FROM_BLOCK=
+NEXT_PUBLIC_SILENTPAY_SCAN_BLOCKS=100000
 ```
 
 For Vercel, add the same values in Project Settings -> Environment Variables.
@@ -52,6 +54,8 @@ Required:
 - `NEXT_PUBLIC_SILENTPAY_CONTRACT_ADDRESS`
 - `NEXT_PUBLIC_FHERC20_ADDRESS`
 - `NEXT_PUBLIC_COFHE_ENV`
+- `NEXT_PUBLIC_SILENTPAY_FROM_BLOCK` is optional, but recommended after deployment so event reads start at your contract deployment block.
+- `NEXT_PUBLIC_SILENTPAY_SCAN_BLOCKS` controls fallback event scan depth when `NEXT_PUBLIC_SILENTPAY_FROM_BLOCK` is empty.
 
 Contract env:
 
@@ -101,7 +105,7 @@ Onchain privacy target:
 
 ## Fhenix Implementation Target
 
-`contracts/SilentPayInvoices.sol` records encrypted invoice accounting:
+`contracts/contracts/SilentPayInvoices.sol` records encrypted invoice accounting:
 
 - `createInvoice(...)` stores encrypted expected amount.
 - `payInvoice(...)` records encrypted paid amount.
@@ -118,6 +122,6 @@ Checkout settlement uses FHERC20:
 Next engineering steps:
 
 1. Compile and deploy `SilentPayInvoices.sol`.
-2. Point `NEXT_PUBLIC_FHERC20_ADDRESS` to the hackathon FHERC20 token.
+2. Point `NEXT_PUBLIC_FHERC20_ADDRESS` to the hackathon FHERC20 token. The current sample value is a verified Base Sepolia FHERC20 token (`isFherc20 = true`, symbol `eUSDC`, decimals `6`).
 3. Add encrypted paid-enough checks and public fulfillment events.
 4. Add contract tests for participant access, receipt viewers, and repeated payments.

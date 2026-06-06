@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import QRCode from "qrcode";
 import type { Address } from "viem";
 import { createBrowserPaymentClients } from "@/lib/browser-wallet";
+import { chainInvoiceLabel, chainPaymentLabel, readChainHistory, type ChainHistory } from "@/lib/chain-history";
 import {
   encodeCreateInvoiceCalldata,
   encryptedInputToPrivacyEnvelope,
@@ -17,12 +18,8 @@ import {
   createId,
   createPrivacyEnvelope,
   invoiceLink,
-  readInvoices,
-  readReceipts,
-  saveInvoice,
   shortAddress,
   SilentInvoice,
-  SilentReceipt,
   TokenSymbol,
   tokenDecimals,
   tokenLabel,
@@ -41,8 +38,6 @@ const defaultMerchant = {
 
 export default function Home() {
   const [mounted, setMounted] = useState(false);
-  const [invoices, setInvoices] = useState<SilentInvoice[]>([]);
-  const [receipts, setReceipts] = useState<SilentReceipt[]>([]);
   const [form, setForm] = useState(defaultMerchant);
   const [lastLink, setLastLink] = useState("");
   const [lastInvoice, setLastInvoice] = useState<SilentInvoice | null>(null);
@@ -51,12 +46,8 @@ export default function Home() {
 
   useEffect(() => {
     setMounted(true);
-    setInvoices(readInvoices());
-    setReceipts(readReceipts());
   }, []);
 
-  const openInvoices = invoices.filter(invoice => invoice.status === "open").length;
-  const paidInvoices = invoices.filter(invoice => invoice.status === "paid").length;
   const lastInvoiceRegistered = lastInvoice?.expectedAmountCipher.kind === "cofhe-encrypted-input";
 
   useEffect(() => {
@@ -98,8 +89,6 @@ export default function Home() {
     };
 
     const link = invoiceLink(window.location.origin, invoice);
-    saveInvoice(invoice);
-    setInvoices(readInvoices());
     setLastLink(link);
     setLastInvoice(invoice);
   }
@@ -141,18 +130,7 @@ export default function Home() {
           </div>
         </div>
         <div className="signal-panel">
-          <div>
-            <span className="metric">{invoices.length}</span>
-            <p>Invoices created</p>
-          </div>
-          <div>
-            <span className="metric">{openInvoices}</span>
-            <p>Open invoices</p>
-          </div>
-          <div>
-            <span className="metric">{paidInvoices}</span>
-            <p>Paid receipts</p>
-          </div>
+          <ChainStats />
           <div className="network-pill">Running on {baseSepolia.name}</div>
         </div>
       </section>
@@ -210,9 +188,8 @@ export default function Home() {
                 <OnchainRegisterPanel
                   invoice={lastInvoice}
                   onRegistered={invoice => {
-                    saveInvoice(invoice);
-                    setInvoices(readInvoices());
                     setLastInvoice(invoice);
+                    setLastLink(invoiceLink(window.location.origin, invoice));
                   }}
                 />
               )}
@@ -237,7 +214,7 @@ export default function Home() {
       </section>
 
       <section className="section-grid">
-        <HistoryPanel invoices={invoices} receipts={receipts} />
+        <ChainHistoryPanel />
         <PrivacyPanel />
       </section>
 
@@ -416,41 +393,139 @@ function OnchainRegisterPanel({
   );
 }
 
-function HistoryPanel({ invoices, receipts }: { invoices: SilentInvoice[]; receipts: SilentReceipt[] }) {
-  const recentItems = useMemo(() => [...receipts].slice(0, 4), [receipts]);
-  const recentInvoices = useMemo(() => [...invoices].slice(0, 5), [invoices]);
+function ChainStats() {
+  if (!hasPrivy) {
+    return (
+      <>
+        <div>
+          <span className="metric">0</span>
+          <p>Onchain invoices</p>
+        </div>
+        <div>
+          <span className="metric">0</span>
+          <p>Encrypted transfers</p>
+        </div>
+        <div>
+          <span className="metric">0</span>
+          <p>Live scan window</p>
+        </div>
+      </>
+    );
+  }
+
+  return <ChainStatsInner />;
+}
+
+function ChainStatsInner() {
+  const { authenticated } = usePrivy();
+  const { wallets } = useWallets();
+  const [history, setHistory] = useState<ChainHistory | null>(null);
+
+  useEffect(() => {
+    if (!authenticated) return;
+    readChainHistory(wallets[0]?.address).then(setHistory).catch(() => setHistory(null));
+  }, [authenticated, wallets]);
+
+  return (
+    <>
+      <div>
+        <span className="metric">{history?.invoices.length ?? 0}</span>
+        <p>Onchain invoices</p>
+      </div>
+      <div>
+        <span className="metric">{history?.payments.length ?? 0}</span>
+        <p>Encrypted transfers</p>
+      </div>
+      <div>
+        <span className="metric">{authenticated ? "live" : "off"}</span>
+        <p>Blockchain history</p>
+      </div>
+    </>
+  );
+}
+
+function ChainHistoryPanel() {
+  if (!hasPrivy) {
+    return (
+      <div className="panel">
+        <div className="section-heading">
+          <p className="eyebrow">Blockchain history</p>
+          <h2>Connect Privy to read live records</h2>
+        </div>
+        <p className="muted-text">Add `NEXT_PUBLIC_PRIVY_APP_ID` so SilentPay can query records for the active merchant or payer.</p>
+      </div>
+    );
+  }
+
+  return <ChainHistoryPanelInner />;
+}
+
+function ChainHistoryPanelInner() {
+  const { authenticated, login } = usePrivy();
+  const { wallets } = useWallets();
+  const [history, setHistory] = useState<ChainHistory | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const account = wallets[0]?.address;
+
+  async function refreshHistory() {
+    if (!authenticated) {
+      login();
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError("");
+      setHistory(await readChainHistory(account));
+    } catch (historyError) {
+      setError(historyError instanceof Error ? historyError.message : "Could not read blockchain history.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!authenticated) return;
+    refreshHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated, account]);
 
   return (
     <div className="panel">
       <div className="section-heading">
-        <p className="eyebrow">Receipts</p>
-        <h2>Payment records for both sides</h2>
+        <p className="eyebrow">Blockchain history</p>
+        <h2>Live records for this wallet</h2>
       </div>
       <p className="muted-text">
-        Merchants track invoices they created. Payers keep receipt links for invoices they completed.
+        SilentPay reads invoice events from your invoice contract and encrypted transfer events from the FHERC20 token.
       </p>
+      <button className="secondary-button full-width" disabled={loading} onClick={refreshHistory}>
+        {loading ? "Reading Base Sepolia..." : authenticated ? "Refresh from blockchain" : "Sign in to read history"}
+      </button>
+      {error && <p className="tiny error-text">{error}</p>}
       <div className="mini-list">
-        {recentItems.length ? (
-          recentItems.map(receipt => (
-            <a className="mini-row" href={`/receipt/${receipt.id}`} key={receipt.id}>
-              <span>{receipt.title}</span>
-              <strong>{receipt.amount} {receipt.token}</strong>
+        {history?.payments.length ? (
+          history.payments.slice(0, 5).map(payment => (
+            <a className="mini-row" href={`${baseSepolia.explorer}/tx/${payment.transactionHash}`} target="_blank" rel="noreferrer" key={payment.transactionHash}>
+              <span>{chainPaymentLabel(payment, account)}</span>
+              <strong>{history.tokenSymbol}</strong>
             </a>
           ))
         ) : (
-          <p className="tiny">No receipts yet. Complete an invoice to generate a private receipt link.</p>
+          <p className="tiny">No encrypted payment events found for this wallet in the scan window.</p>
         )}
       </div>
       <div className="mini-list">
-        {recentInvoices.length ? (
-          recentInvoices.map(invoice => (
-            <a className="mini-row" href={`/invoice/${invoice.id}`} key={invoice.id}>
-              <span>{invoice.title}</span>
-              <strong>{invoice.status}</strong>
+        {history?.invoices.length ? (
+          history.invoices.slice(0, 5).map(invoice => (
+            <a className="mini-row" href={`${baseSepolia.explorer}/tx/${invoice.transactionHash}`} target="_blank" rel="noreferrer" key={invoice.transactionHash}>
+              <span>{chainInvoiceLabel(invoice)}</span>
+              <strong>{shortAddress(invoice.merchant)}</strong>
             </a>
           ))
         ) : (
-          <p className="tiny">Created invoices will appear here for the merchant side of the flow.</p>
+          <p className="tiny">No onchain invoices found for this merchant wallet in the scan window.</p>
         )}
       </div>
     </div>

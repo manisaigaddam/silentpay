@@ -52,9 +52,6 @@ export interface ReceiptPayload {
   receipt: SilentReceipt;
 }
 
-const invoiceKey = "silentpay.invoices.v1";
-const receiptKey = "silentpay.receipts.v1";
-
 export const baseSepolia = {
   id: 84532,
   name: "Base Sepolia",
@@ -108,40 +105,6 @@ export function receiptLink(origin: string, receipt: SilentReceipt) {
   return `${origin}/receipt/${receipt.id}#${encodeReceiptPayload(receipt)}`;
 }
 
-export function saveInvoice(invoice: SilentInvoice) {
-  const invoices = readInvoices();
-  writeStorage(invoiceKey, [invoice, ...invoices.filter(item => item.id !== invoice.id)]);
-}
-
-export function readInvoices(): SilentInvoice[] {
-  return readStorage<SilentInvoice[]>(invoiceKey, []);
-}
-
-export function findInvoice(invoiceId: string) {
-  return readInvoices().find(invoice => invoice.id === invoiceId);
-}
-
-export function markInvoicePaid(invoiceId: string) {
-  const invoices = readInvoices();
-  writeStorage(
-    invoiceKey,
-    invoices.map(invoice => (invoice.id === invoiceId ? { ...invoice, status: "paid" } : invoice)),
-  );
-}
-
-export function saveReceipt(receipt: SilentReceipt) {
-  const receipts = readReceipts();
-  writeStorage(receiptKey, [receipt, ...receipts.filter(item => item.id !== receipt.id)]);
-}
-
-export function readReceipts(): SilentReceipt[] {
-  return readStorage<SilentReceipt[]>(receiptKey, []);
-}
-
-export function findReceipt(receiptId: string) {
-  return readReceipts().find(receipt => receipt.id === receiptId);
-}
-
 export function shortAddress(address: string) {
   if (!address) return "Not connected";
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
@@ -171,21 +134,6 @@ function decodePayload<T extends { version: number }>(hash: string, version: num
   } catch {
     return null;
   }
-}
-
-function readStorage<T>(key: string, fallback: T): T {
-  if (typeof window === "undefined") return fallback;
-  try {
-    const raw = window.localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeStorage<T>(key: string, value: T) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(key, JSON.stringify(value));
 }
 
 function encodeBase64Url(value: string) {

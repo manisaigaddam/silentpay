@@ -1,4 +1,5 @@
 import { encodeFunctionData, keccak256, parseUnits, stringToHex } from "viem";
+import type { createBrowserPaymentClients } from "./browser-wallet";
 import type { PrivacyEnvelope } from "./silentpay";
 
 const encryptedUint128Components = [
@@ -53,10 +54,7 @@ export interface CofheEncryptedInput {
   signature: `0x${string}`;
 }
 
-export interface CofhePaymentClients {
-  publicClient: unknown;
-  walletClient: unknown;
-}
+export type CofhePaymentClients = ReturnType<typeof createBrowserPaymentClients>;
 
 export function invoiceIdToBytes32(invoiceId: string) {
   return keccak256(stringToHex(invoiceId));

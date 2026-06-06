@@ -1,6 +1,6 @@
 # SilentPay Fhenix Contracts
 
-`SilentPayInvoices.sol` is the first onchain target for the app.
+`contracts/SilentPayInvoices.sol` is the first onchain target for the app.
 
 It is intentionally scoped to encrypted invoice accounting:
 

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { isAddress, type Address } from "viem";
 import { createBrowserPaymentClients } from "@/lib/browser-wallet";
@@ -16,13 +15,10 @@ import {
   baseSepolia,
   createId,
   decodeInvoicePayload,
-  findInvoice,
   invoiceLink,
-  markInvoicePaid,
   PaymentRail,
   PrivacyEnvelope,
   receiptLink,
-  saveReceipt,
   shortAddress,
   SilentInvoice,
   SilentReceipt,
@@ -42,7 +38,6 @@ interface PaymentCompletion {
 }
 
 export default function InvoicePage() {
-  const params = useParams<{ id: string }>();
   const [invoice, setInvoice] = useState<SilentInvoice | null>(null);
   const [status, setStatus] = useState<CheckoutStatus>("idle");
   const [receiptUrl, setReceiptUrl] = useState("");
@@ -52,12 +47,9 @@ export default function InvoicePage() {
     const payload = decodeInvoicePayload(window.location.hash);
     if (payload?.invoice) {
       setInvoice(payload.invoice);
-    } else if (params.id) {
-      const localInvoice = findInvoice(params.id);
-      if (localInvoice) setInvoice(localInvoice);
     }
     setOrigin(window.location.origin);
-  }, [params.id]);
+  }, []);
 
   function recordEncryptedPayment(payment: PaymentCompletion) {
     if (!invoice) return;
@@ -81,8 +73,6 @@ export default function InvoicePage() {
       paymentCipher: payment.paymentCipher,
     };
 
-    saveReceipt(receipt);
-    markInvoicePaid(invoice.id);
     setReceiptUrl(receiptLink(window.location.origin, receipt));
     setStatus("paid");
   }

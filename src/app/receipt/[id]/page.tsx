@@ -1,22 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
-import { decodeReceiptPayload, findReceipt, railLabel, shortAddress, SilentReceipt } from "@/lib/silentpay";
+import { decodeReceiptPayload, railLabel, shortAddress, SilentReceipt } from "@/lib/silentpay";
 
 export default function ReceiptPage() {
-  const params = useParams<{ id: string }>();
   const [receipt, setReceipt] = useState<SilentReceipt | null>(null);
 
   useEffect(() => {
     const payload = decodeReceiptPayload(window.location.hash);
     if (payload?.receipt) {
       setReceipt(payload.receipt);
-    } else if (params.id) {
-      const localReceipt = findReceipt(params.id);
-      if (localReceipt) setReceipt(localReceipt);
     }
-  }, [params.id]);
+  }, []);
 
   if (!receipt) {
     return (

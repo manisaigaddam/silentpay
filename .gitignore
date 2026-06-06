@@ -3,6 +3,7 @@ node_modules
 out
 dist
 .env
+contracts/.env
 .env.local
 .env.*.local
 .vercel
@@ -12,3 +13,10 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 coverage
+contracts/node_modules
+contracts/artifacts
+contracts/cache
+contracts/typechain-types
+cache
+artifacts
+typechain-types
