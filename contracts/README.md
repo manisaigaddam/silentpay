@@ -8,11 +8,20 @@ It is intentionally scoped to encrypted invoice accounting:
 - payer submits encrypted paid amount
 - contract accumulates paid amount with `FHE.add`
 - decrypt access is granted only to merchant, payer, and optional receipt viewer
+- participant getter returns encrypted handles only to involved addresses
 - public events reveal invoice/payment activity, not payment amount or memo
+
+Run locally:
+
+```bash
+cp .env.example .env
+npm install
+npm run compile
+npm run deploy
+```
 
 Next contract step:
 
 1. Add FHERC20 settlement once the exact token interface is selected.
 2. Add encrypted paid-enough checks and optional public fulfillment signal.
 3. Add tests for permission boundaries and receipt access.
-4. Deploy to the Fhenix-supported testnet path used by the hackathon resources.

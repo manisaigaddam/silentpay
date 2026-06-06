@@ -1,11 +1,13 @@
 export type InvoiceStatus = "open" | "paid" | "expired";
 
-export type TokenSymbol = "fhUSDC" | "fhETH" | "USDC";
+export type TokenSymbol = "fhUSDC" | "fhETH";
+
+export type PaymentRail = "privy-email-wallet" | "connected-wallet";
 
 export interface PrivacyEnvelope {
-  kind: "local-preview-seal" | "cofhe-encrypted-input";
+  kind: "pending-cofhe-registration" | "cofhe-encrypted-input";
   handle: string;
-  inputProof: string;
+  verifierSignature: string;
   note: string;
 }
 
@@ -36,6 +38,7 @@ export interface SilentReceipt {
   token: TokenSymbol;
   txHash: string;
   paidAt: string;
+  rail: PaymentRail;
   paymentCipher: PrivacyEnvelope;
 }
 
@@ -74,10 +77,10 @@ export function createPrivacyEnvelope(value: string, purpose: string): PrivacyEn
   const encoded = encodeBase64Url(seed);
 
   return {
-    kind: "local-preview-seal",
+    kind: "pending-cofhe-registration",
     handle: `0x${encoded.padEnd(64, "0").slice(0, 64)}`,
-    inputProof: `proof_${encodeBase64Url(`${seed}:proof`).slice(0, 32)}`,
-    note: "Local preview seal. The onchain path uses @cofhe/sdk encrypted input plus inputProof.",
+    verifierSignature: `sig_${encodeBase64Url(`${seed}:signature`).slice(0, 32)}`,
+    note: "Pending registration. Share the payment link after this value is replaced by a CoFHE encrypted input.",
   };
 }
 
@@ -135,20 +138,27 @@ export function readReceipts(): SilentReceipt[] {
   return readStorage<SilentReceipt[]>(receiptKey, []);
 }
 
+export function findReceipt(receiptId: string) {
+  return readReceipts().find(receipt => receipt.id === receiptId);
+}
+
 export function shortAddress(address: string) {
   if (!address) return "Not connected";
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
-export function fakeTxHash(invoiceId: string, payerAddress: string) {
-  const seed = encodeBase64Url(`${invoiceId}:${payerAddress}:${Date.now()}:${Math.random()}`);
-  return `0x${seed.padEnd(64, "0").slice(0, 64)}`;
+export function railLabel(rail: PaymentRail) {
+  if (rail === "privy-email-wallet") return "Privy email wallet";
+  return "Connected wallet";
 }
 
 export function tokenLabel(token: TokenSymbol) {
   if (token === "fhUSDC") return "fhUSDC private stablecoin";
-  if (token === "fhETH") return "fhETH private native-style token";
-  return "USDC public fallback";
+  return "fhETH private native-style token";
+}
+
+export function tokenDecimals(token: TokenSymbol) {
+  return token === "fhETH" ? 18 : 6;
 }
 
 function decodePayload<T extends { version: number }>(hash: string, version: number): T | null {

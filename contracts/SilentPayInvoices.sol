@@ -17,6 +17,7 @@ contract SilentPayInvoices {
     }
 
     mapping(bytes32 => Invoice) private _invoices;
+    mapping(bytes32 => mapping(address => bool)) private _participants;
 
     event InvoiceCreated(bytes32 indexed invoiceId, address indexed merchant, bytes32 invoiceHash);
     event PaymentRecorded(bytes32 indexed invoiceId, address indexed payer, address indexed receiptViewer);
@@ -25,6 +26,7 @@ contract SilentPayInvoices {
     error InvoiceAlreadyExists();
     error InvoiceNotFound();
     error NotMerchant();
+    error NotParticipant();
     error AlreadySettled();
 
     function createInvoice(
@@ -43,6 +45,7 @@ contract SilentPayInvoices {
         invoice.expectedAmount = expectedAmount;
         invoice.paidAmount = zeroPaid;
         invoice.exists = true;
+        _participants[invoiceId][msg.sender] = true;
 
         FHE.allowThis(invoice.expectedAmount);
         FHE.allow(invoice.expectedAmount, msg.sender);
@@ -62,12 +65,16 @@ contract SilentPayInvoices {
 
         euint128 amount = FHE.asEuint128(encryptedAmount);
         invoice.paidAmount = FHE.add(invoice.paidAmount, amount);
+        _participants[invoiceId][msg.sender] = true;
 
         FHE.allowThis(invoice.paidAmount);
+        FHE.allow(invoice.expectedAmount, msg.sender);
         FHE.allow(invoice.paidAmount, invoice.merchant);
         FHE.allow(invoice.paidAmount, msg.sender);
 
         if (receiptViewer != address(0) && receiptViewer != msg.sender) {
+            _participants[invoiceId][receiptViewer] = true;
+            FHE.allow(invoice.expectedAmount, receiptViewer);
             FHE.allow(invoice.paidAmount, receiptViewer);
         }
 
@@ -99,6 +106,16 @@ contract SilentPayInvoices {
     {
         Invoice storage invoice = _requireInvoice(invoiceId);
         if (msg.sender != invoice.merchant) revert NotMerchant();
+        return (invoice.expectedAmount, invoice.paidAmount);
+    }
+
+    function getParticipantEncryptedAmounts(bytes32 invoiceId)
+        external
+        view
+        returns (euint128 expectedAmount, euint128 paidAmount)
+    {
+        Invoice storage invoice = _requireInvoice(invoiceId);
+        if (!_participants[invoiceId][msg.sender]) revert NotParticipant();
         return (invoice.expectedAmount, invoice.paidAmount);
     }
 

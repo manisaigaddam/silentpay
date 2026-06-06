@@ -527,9 +527,48 @@ code,
   background: rgba(114, 227, 159, 0.08);
 }
 
+.payer-actions {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.payer-actions .tiny {
+  margin: 0;
+  line-height: 1.6;
+}
+
 .receipt-callout p {
   margin: 0;
   color: var(--good);
+  font-weight: 700;
+}
+
+.chain-callout {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid rgba(10, 217, 220, 0.28);
+  border-radius: 8px;
+  background: rgba(10, 217, 220, 0.07);
+}
+
+.chain-callout strong,
+.chain-callout p {
+  margin: 0;
+}
+
+.chain-callout p {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.error-text {
+  color: #ff9a83;
+}
+
+.link-text {
+  color: var(--cyan);
   font-weight: 700;
 }
 

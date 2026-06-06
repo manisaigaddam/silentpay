@@ -2,6 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
+import QRCode from "qrcode";
+import type { Address } from "viem";
+import { createBrowserPaymentClients } from "@/lib/browser-wallet";
+import {
+  encodeCreateInvoiceCalldata,
+  encryptedInputToPrivacyEnvelope,
+  encryptInvoiceAmount,
+  getSilentPayContractAddress,
+  isContractReady,
+} from "@/lib/fhenix-client";
 import {
   baseSepolia,
   createId,
@@ -14,6 +24,7 @@ import {
   SilentInvoice,
   SilentReceipt,
   TokenSymbol,
+  tokenDecimals,
   tokenLabel,
 } from "@/lib/silentpay";
 
@@ -34,6 +45,8 @@ export default function Home() {
   const [receipts, setReceipts] = useState<SilentReceipt[]>([]);
   const [form, setForm] = useState(defaultMerchant);
   const [lastLink, setLastLink] = useState("");
+  const [lastInvoice, setLastInvoice] = useState<SilentInvoice | null>(null);
+  const [qrDataUrl, setQrDataUrl] = useState("");
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
@@ -44,6 +57,30 @@ export default function Home() {
 
   const openInvoices = invoices.filter(invoice => invoice.status === "open").length;
   const paidInvoices = invoices.filter(invoice => invoice.status === "paid").length;
+  const lastInvoiceRegistered = lastInvoice?.expectedAmountCipher.kind === "cofhe-encrypted-input";
+
+  useEffect(() => {
+    if (!lastLink) {
+      setQrDataUrl("");
+      return;
+    }
+
+    let active = true;
+    QRCode.toDataURL(lastLink, {
+      width: 220,
+      margin: 1,
+      color: {
+        dark: "#050505",
+        light: "#ffffff",
+      },
+    }).then(url => {
+      if (active) setQrDataUrl(url);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [lastLink]);
 
   function createInvoice() {
     const invoice: SilentInvoice = {
@@ -64,6 +101,7 @@ export default function Home() {
     saveInvoice(invoice);
     setInvoices(readInvoices());
     setLastLink(link);
+    setLastInvoice(invoice);
   }
 
   async function copyLink(value: string) {
@@ -105,7 +143,7 @@ export default function Home() {
         <div className="signal-panel">
           <div>
             <span className="metric">{invoices.length}</span>
-            <p>Invoices created locally</p>
+            <p>Invoices created</p>
           </div>
           <div>
             <span className="metric">{openInvoices}</span>
@@ -143,7 +181,6 @@ export default function Home() {
               <select value={form.token} onChange={event => setForm({ ...form, token: event.target.value as TokenSymbol })}>
                 <option value="fhUSDC">fhUSDC</option>
                 <option value="fhETH">fhETH</option>
-                <option value="USDC">USDC public fallback</option>
               </select>
             </label>
             <label>
@@ -155,7 +192,7 @@ export default function Home() {
               <textarea value={form.memo} onChange={event => setForm({ ...form, memo: event.target.value })} rows={4} />
             </label>
           </div>
-          <button className="primary-button full-width" onClick={createInvoice}>Generate private payment link</button>
+          <MerchantCreateButton onCreate={createInvoice} />
         </div>
 
         <div className="panel">
@@ -166,12 +203,28 @@ export default function Home() {
           {lastLink ? (
             <div className="link-result">
               <div className="qr-box">
-                <img alt="SilentPay QR" src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(lastLink)}`} />
+                {qrDataUrl ? <img alt="SilentPay QR" src={qrDataUrl} /> : <span className="tiny">Preparing QR...</span>}
               </div>
               <code>{lastLink}</code>
+              {lastInvoice && hasPrivy && (
+                <OnchainRegisterPanel
+                  invoice={lastInvoice}
+                  onRegistered={invoice => {
+                    saveInvoice(invoice);
+                    setInvoices(readInvoices());
+                    setLastInvoice(invoice);
+                  }}
+                />
+              )}
               <div className="button-row">
-                <button className="secondary-button" onClick={() => copyLink(lastLink)}>{copied ? "Copied" : "Copy link"}</button>
-                <a className="primary-button" href={lastLink}>Open checkout</a>
+                <button className="secondary-button" disabled={!lastInvoiceRegistered} onClick={() => copyLink(lastLink)}>
+                  {copied ? "Copied" : "Copy link"}
+                </button>
+                {lastInvoiceRegistered ? (
+                  <a className="primary-button" href={lastLink}>Open checkout</a>
+                ) : (
+                  <button className="primary-button" disabled>Register invoice first</button>
+                )}
               </div>
             </div>
           ) : (
@@ -195,9 +248,9 @@ export default function Home() {
         </div>
         <div className="flow-grid">
           <FlowStep index="01" title="Create" text="The merchant creates an invoice. Private metadata is sealed offchain; the contract stores only an invoice commitment and encrypted expected amount." />
-          <FlowStep index="02" title="Open" text="The payer opens a SilentPay checkout link or QR. Privy can create an embedded wallet for users without an existing wallet." />
-          <FlowStep index="03" title="Encrypt" text="The checkout page encrypts payment input with CoFHE and prepares calldata containing ciphertext plus inputProof." />
-          <FlowStep index="04" title="Settle" text="The contract records encrypted payment state and grants decrypt access only to the payer and merchant." />
+          <FlowStep index="02" title="Open" text="The payer opens a SilentPay checkout link or QR. Privy supports email onboarding or a connected wallet." />
+          <FlowStep index="03" title="Encrypt" text="The checkout page encrypts payment input with CoFHE and prepares calldata containing the ciphertext handle plus verifier signature." />
+          <FlowStep index="04" title="Settle" text="The payer signs one FHERC20 encrypted transfer to the merchant; the real amount remains confidential." />
         </div>
         <pre className="code-block">{`// Intended SDK shape
 const invoice = await silentpay.invoices.create({
@@ -238,7 +291,7 @@ function PrivyAuthBlock() {
       <span className={`status-dot ${authenticated ? "live" : "idle"}`} />
       <div>
         <strong>{authenticated ? user?.email?.address || "Privy user" : "Checkout identity"}</strong>
-        <small>{authenticated ? shortAddress(address) : "Email, social login, embedded wallet, or wallet."}</small>
+        <small>{authenticated ? shortAddress(address) : "Email wallet or connected wallet."}</small>
       </div>
       <button className="small-button" disabled={!ready} onClick={authenticated ? logout : login}>
         {authenticated ? "Sign out" : "Sign in"}
@@ -247,8 +300,125 @@ function PrivyAuthBlock() {
   );
 }
 
+function MerchantCreateButton({ onCreate }: { onCreate: () => void }) {
+  if (!hasPrivy) {
+    return (
+      <button className="primary-button full-width" disabled>
+        Configure Privy to create invoices
+      </button>
+    );
+  }
+
+  return <MerchantCreateButtonInner onCreate={onCreate} />;
+}
+
+function MerchantCreateButtonInner({ onCreate }: { onCreate: () => void }) {
+  const { ready, authenticated, login } = usePrivy();
+
+  return (
+    <button className="primary-button full-width" disabled={!ready} onClick={authenticated ? onCreate : login}>
+      {authenticated ? "Generate private payment link" : "Sign in to create invoice"}
+    </button>
+  );
+}
+
+function OnchainRegisterPanel({
+  invoice,
+  onRegistered,
+}: {
+  invoice: SilentInvoice;
+  onRegistered: (invoice: SilentInvoice) => void;
+}) {
+  const { ready, authenticated, login } = usePrivy();
+  const { wallets } = useWallets();
+  const [status, setStatus] = useState<"idle" | "encrypting" | "registered" | "error">("idle");
+  const [txHash, setTxHash] = useState("");
+  const [message, setMessage] = useState("");
+  const wallet = wallets[0];
+  const contractAddress = getSilentPayContractAddress();
+
+  async function registerEncryptedInvoice() {
+    if (!authenticated) {
+      login();
+      return;
+    }
+
+    if (!wallet?.address || !contractAddress) {
+      setStatus("error");
+      setMessage("Add contract env vars and sign in with a funded Base Sepolia wallet.");
+      return;
+    }
+
+    try {
+      setStatus("encrypting");
+      setMessage("Encrypting expected amount and preparing FHE calldata...");
+
+      const provider = await wallet.getEthereumProvider();
+      const account = wallet.address as Address;
+      const clients = createBrowserPaymentClients(provider, account);
+      const encryptedExpectedAmount = await encryptInvoiceAmount({
+        amount: invoice.amount,
+        decimals: tokenDecimals(invoice.token),
+        clients,
+      });
+
+      const metadata = JSON.stringify({
+        invoiceId: invoice.id,
+        merchantName: invoice.merchantName,
+        title: invoice.title,
+        memo: invoice.memo,
+        token: invoice.token,
+      });
+
+      const data = encodeCreateInvoiceCalldata({
+        invoiceId: invoice.id,
+        metadata,
+        encryptedExpectedAmount,
+      });
+
+      const hash = await clients.walletClient.sendTransaction({
+        account,
+        to: contractAddress,
+        data,
+      });
+
+      onRegistered({
+        ...invoice,
+        expectedAmountCipher: encryptedInputToPrivacyEnvelope(encryptedExpectedAmount, "Invoice expected amount"),
+      });
+      setTxHash(hash);
+      setStatus("registered");
+      setMessage("Encrypted invoice registered onchain.");
+    } catch (error) {
+      setStatus("error");
+      setMessage(error instanceof Error ? error.message : "Could not register encrypted invoice.");
+    }
+  }
+
+  return (
+    <div className="chain-callout">
+      <div>
+        <strong>{isContractReady() ? "FHE contract path ready" : "FHE contract not configured"}</strong>
+        <p>
+          Register the invoice commitment and encrypted expected amount before sharing the payment link.
+        </p>
+      </div>
+      <button className="secondary-button full-width" disabled={!ready || status === "encrypting"} onClick={registerEncryptedInvoice}>
+        {status === "encrypting" ? "Encrypting invoice..." : status === "registered" ? "Invoice registered" : "Register encrypted invoice"}
+      </button>
+      {message && <p className={`tiny ${status === "error" ? "error-text" : ""}`}>{message}</p>}
+      {txHash && (
+        <a className="tiny link-text" href={`${baseSepolia.explorer}/tx/${txHash}`} target="_blank" rel="noreferrer">
+          View invoice transaction
+        </a>
+      )}
+    </div>
+  );
+}
+
 function HistoryPanel({ invoices, receipts }: { invoices: SilentInvoice[]; receipts: SilentReceipt[] }) {
   const recentItems = useMemo(() => [...receipts].slice(0, 4), [receipts]);
+  const recentInvoices = useMemo(() => [...invoices].slice(0, 5), [invoices]);
 
   return (
     <div className="panel">
@@ -272,12 +442,16 @@ function HistoryPanel({ invoices, receipts }: { invoices: SilentInvoice[]; recei
         )}
       </div>
       <div className="mini-list">
-        {invoices.slice(0, 3).map(invoice => (
-          <a className="mini-row" href={`/invoice/${invoice.id}`} key={invoice.id}>
-            <span>{invoice.title}</span>
-            <strong>{invoice.status}</strong>
-          </a>
-        ))}
+        {recentInvoices.length ? (
+          recentInvoices.map(invoice => (
+            <a className="mini-row" href={`/invoice/${invoice.id}`} key={invoice.id}>
+              <span>{invoice.title}</span>
+              <strong>{invoice.status}</strong>
+            </a>
+          ))
+        ) : (
+          <p className="tiny">Created invoices will appear here for the merchant side of the flow.</p>
+        )}
       </div>
     </div>
   );
@@ -296,7 +470,7 @@ function PrivacyPanel() {
           <ul>
             <li>tx hash, block, gas</li>
             <li>SilentPay contract address</li>
-            <li>ciphertext handles/inputProof</li>
+            <li>ciphertext handles and verifier signatures</li>
             <li>signer address unless embedded/abstracted</li>
           </ul>
         </div>

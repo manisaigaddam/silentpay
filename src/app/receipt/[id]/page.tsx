@@ -1,17 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { decodeReceiptPayload, shortAddress, SilentReceipt } from "@/lib/silentpay";
+import { useParams } from "next/navigation";
+import { decodeReceiptPayload, findReceipt, railLabel, shortAddress, SilentReceipt } from "@/lib/silentpay";
 
 export default function ReceiptPage() {
+  const params = useParams<{ id: string }>();
   const [receipt, setReceipt] = useState<SilentReceipt | null>(null);
 
   useEffect(() => {
     const payload = decodeReceiptPayload(window.location.hash);
     if (payload?.receipt) {
       setReceipt(payload.receipt);
+    } else if (params.id) {
+      const localReceipt = findReceipt(params.id);
+      if (localReceipt) setReceipt(localReceipt);
     }
-  }, []);
+  }, [params.id]);
 
   if (!receipt) {
     return (
@@ -40,6 +45,7 @@ export default function ReceiptPage() {
           <p><span>Payer</span><strong>{receipt.payerLabel}</strong></p>
           <p><span>Merchant address</span><strong>{shortAddress(receipt.merchantAddress)}</strong></p>
           <p><span>Payer address</span><strong>{shortAddress(receipt.payerAddress)}</strong></p>
+          <p><span>Payment rail</span><strong>{railLabel(receipt.rail)}</strong></p>
           <p><span>Paid at</span><strong>{new Date(receipt.paidAt).toLocaleString()}</strong></p>
         </div>
         <div className="sealed-box">

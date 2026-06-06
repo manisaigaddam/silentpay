@@ -1,0 +1,21 @@
+{
+  "name": "@silentpay/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "compile": "hardhat compile",
+    "deploy": "hardhat run scripts/deploy.ts --network baseSepolia"
+  },
+  "dependencies": {
+    "@cofhe/hardhat-plugin": "0.6.0",
+    "@cofhe/sdk": "0.6.0",
+    "@fhenixprotocol/cofhe-contracts": "0.1.4",
+    "dotenv": "^17.3.1"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^6.1.2",
+    "hardhat": "^2.22.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}

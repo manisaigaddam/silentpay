@@ -3,29 +3,48 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
+import { isAddress, type Address } from "viem";
+import { createBrowserPaymentClients } from "@/lib/browser-wallet";
+import {
+  encodeFherc20TransferCalldata,
+  encryptedInputToPrivacyEnvelope,
+  encryptInvoiceAmount,
+  getFherc20Address,
+  isFherc20Ready,
+} from "@/lib/fhenix-client";
 import {
   baseSepolia,
   createId,
-  createPrivacyEnvelope,
   decodeInvoicePayload,
   findInvoice,
-  fakeTxHash,
   invoiceLink,
   markInvoicePaid,
+  PaymentRail,
+  PrivacyEnvelope,
   receiptLink,
   saveReceipt,
   shortAddress,
   SilentInvoice,
   SilentReceipt,
+  tokenDecimals,
   tokenLabel,
 } from "@/lib/silentpay";
 
 const hasPrivy = Boolean(process.env.NEXT_PUBLIC_PRIVY_APP_ID);
+type CheckoutStatus = "idle" | "encrypting" | "paid";
+
+interface PaymentCompletion {
+  payerAddress: string;
+  payerLabel: string;
+  rail: PaymentRail;
+  txHash: string;
+  paymentCipher: PrivacyEnvelope;
+}
 
 export default function InvoicePage() {
   const params = useParams<{ id: string }>();
   const [invoice, setInvoice] = useState<SilentInvoice | null>(null);
-  const [status, setStatus] = useState<"idle" | "encrypting" | "ready" | "paid">("idle");
+  const [status, setStatus] = useState<CheckoutStatus>("idle");
   const [receiptUrl, setReceiptUrl] = useState("");
   const [origin, setOrigin] = useState("");
 
@@ -40,33 +59,32 @@ export default function InvoicePage() {
     setOrigin(window.location.origin);
   }, [params.id]);
 
-  function simulatePayment(payerAddress: string, payerLabel: string) {
+  function recordEncryptedPayment(payment: PaymentCompletion) {
     if (!invoice) return;
 
     setStatus("encrypting");
 
-    setTimeout(() => {
-      const receipt: SilentReceipt = {
-        id: createId("rcpt"),
-        invoiceId: invoice.id,
-        merchantName: invoice.merchantName,
-        merchantAddress: invoice.merchantAddress,
-        payerAddress,
-        payerLabel,
-        title: invoice.title,
-        memo: invoice.memo,
-        amount: invoice.amount,
-        token: invoice.token,
-        txHash: fakeTxHash(invoice.id, payerAddress),
-        paidAt: new Date().toISOString(),
-        paymentCipher: createPrivacyEnvelope(`${invoice.amount}:${invoice.token}:${payerAddress}`, "payment-amount"),
-      };
+    const receipt: SilentReceipt = {
+      id: createId("rcpt"),
+      invoiceId: invoice.id,
+      merchantName: invoice.merchantName,
+      merchantAddress: invoice.merchantAddress,
+      payerAddress: payment.payerAddress,
+      payerLabel: payment.payerLabel,
+      title: invoice.title,
+      memo: invoice.memo,
+      amount: invoice.amount,
+      token: invoice.token,
+      txHash: payment.txHash,
+      paidAt: new Date().toISOString(),
+      rail: payment.rail,
+      paymentCipher: payment.paymentCipher,
+    };
 
-      saveReceipt(receipt);
-      markInvoicePaid(invoice.id);
-      setReceiptUrl(receiptLink(window.location.origin, receipt));
-      setStatus("paid");
-    }, 900);
+    saveReceipt(receipt);
+    markInvoicePaid(invoice.id);
+    setReceiptUrl(receiptLink(window.location.origin, receipt));
+    setStatus("paid");
   }
 
   if (!invoice) {
@@ -109,7 +127,7 @@ export default function InvoicePage() {
             <p><span>Network</span><strong>{baseSepolia.name}</strong></p>
             <p><span>Token mode</span><strong>{tokenLabel(invoice.token)}</strong></p>
           </div>
-          <PayerAction invoice={invoice} status={status} onPay={simulatePayment} />
+          <PayerAction invoice={invoice} status={status} onPay={recordEncryptedPayment} />
           {receiptUrl && (
             <div className="receipt-callout">
               <p>Your private receipt is ready.</p>
@@ -122,15 +140,14 @@ export default function InvoicePage() {
           <p className="eyebrow">Under the hood</p>
           <h2>Where FHE happens</h2>
           <ol className="underhood-list">
-            <li>SilentPay page resolves the invoice payload and shows details to the payer.</li>
-            <li>Client encrypts the payment amount with CoFHE before signing.</li>
-            <li>Wallet signs opaque calldata: invoice ID, ciphertext handle, inputProof.</li>
-            <li>Contract grants decrypt access to payer and merchant only.</li>
+            <li>SilentPay resolves the private invoice payload in the checkout page.</li>
+            <li>The page encrypts the payment amount with CoFHE before any transaction is signed.</li>
+            <li>The payer signs one FHERC20 encrypted transfer to the merchant.</li>
+            <li>The explorer sees an indicated token movement and ciphertext handle, not the real amount.</li>
           </ol>
-          <pre className="code-block">{`payInvoice(
-  invoiceId,
-  encryptedAmount,
-  inputProof
+          <pre className="code-block">{`FHERC20.encTransfer(
+  merchant,
+  { ctHash, securityZone, utype, signature }
 )`}</pre>
           <a className="secondary-button full-width" href={origin ? invoiceLink(origin, invoice) : `/invoice/${invoice.id}`}>
             Copy-safe invoice route
@@ -147,22 +164,21 @@ function PayerAction({
   onPay,
 }: {
   invoice: SilentInvoice;
-  status: "idle" | "encrypting" | "ready" | "paid";
-  onPay: (payerAddress: string, payerLabel: string) => void;
+  status: CheckoutStatus;
+  onPay: (payment: PaymentCompletion) => void;
 }) {
-  if (!hasPrivy) {
-    return (
-      <button
-        className="primary-button full-width"
-        disabled={status === "encrypting" || status === "paid"}
-        onClick={() => onPay("0x000000000000000000000000000000000000dEaD", "Local payer")}
-      >
-        {status === "encrypting" ? "Encrypting payment input..." : status === "paid" ? "Payment recorded" : `Pay ${invoice.amount} ${invoice.token}`}
-      </button>
-    );
-  }
-
-  return <PrivyPayerAction invoice={invoice} status={status} onPay={onPay} />;
+  return (
+    <div className="payer-actions">
+      {hasPrivy ? (
+        <PrivyPayerAction invoice={invoice} status={status} onPay={onPay} />
+      ) : (
+        <div className="chain-callout">
+          <strong>Privy is required for real payment signing</strong>
+          <p>Add `NEXT_PUBLIC_PRIVY_APP_ID` so payers can continue with email or connect a wallet.</p>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function PrivyPayerAction({
@@ -171,28 +187,100 @@ function PrivyPayerAction({
   onPay,
 }: {
   invoice: SilentInvoice;
-  status: "idle" | "encrypting" | "ready" | "paid";
-  onPay: (payerAddress: string, payerLabel: string) => void;
+  status: CheckoutStatus;
+  onPay: (payment: PaymentCompletion) => void;
 }) {
   const { ready, authenticated, login, user } = usePrivy();
   const { wallets } = useWallets();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
   const wallet = wallets[0];
 
   if (!authenticated) {
     return (
       <button className="primary-button full-width" disabled={!ready} onClick={login}>
-        Continue with Privy
+        Continue with email or wallet
       </button>
     );
   }
 
+  async function payWithPrivyWallet() {
+    const fherc20Address = getFherc20Address();
+
+    if (!wallet?.address) {
+      setError("Wallet is still being prepared. Try again in a moment.");
+      return;
+    }
+
+    if (!fherc20Address) {
+      setError("Missing NEXT_PUBLIC_FHERC20_ADDRESS. Add a deployed FHERC20 token address before testing real payments.");
+      return;
+    }
+
+    if (!isAddress(invoice.merchantAddress)) {
+      setError("Merchant settlement address is not a valid EVM address.");
+      return;
+    }
+
+    try {
+      setPending(true);
+      setError("");
+
+      const payerAddress = wallet.address as Address;
+      const merchantAddress = invoice.merchantAddress as Address;
+      const walletType = (wallet as { walletClientType?: string }).walletClientType || "";
+      const rail: PaymentRail = walletType.startsWith("privy") ? "privy-email-wallet" : "connected-wallet";
+      const payerLabel = user?.email?.address || (rail === "connected-wallet" ? "Connected wallet payer" : "Privy email payer");
+      const provider = await wallet.getEthereumProvider();
+      const clients = createBrowserPaymentClients(provider, payerAddress);
+      const encryptedAmount = await encryptInvoiceAmount({
+        amount: invoice.amount,
+        decimals: tokenDecimals(invoice.token),
+        clients,
+      });
+      const data = encodeFherc20TransferCalldata({
+        merchantAddress,
+        encryptedAmount,
+      });
+      const txHash = await clients.walletClient.sendTransaction({
+        account: payerAddress,
+        to: fherc20Address,
+        data,
+      });
+
+      onPay({
+        payerAddress,
+        payerLabel,
+        rail,
+        txHash,
+        paymentCipher: encryptedInputToPrivacyEnvelope(encryptedAmount, "FHERC20 payment amount"),
+      });
+    } catch (paymentError) {
+      setError(paymentError instanceof Error ? paymentError.message : "Payment could not be submitted.");
+    } finally {
+      setPending(false);
+    }
+  }
+
   return (
-    <button
-      className="primary-button full-width"
-      disabled={status === "encrypting" || status === "paid"}
-      onClick={() => onPay(wallet?.address || "0xEmbeddedWalletPending", user?.email?.address || "Privy payer")}
-    >
-      {status === "encrypting" ? "Encrypting and preparing signature..." : status === "paid" ? "Payment recorded" : `Pay ${invoice.amount} ${invoice.token}`}
-    </button>
+    <>
+      <button
+        className="primary-button full-width"
+        disabled={pending || status === "encrypting" || status === "paid"}
+        onClick={payWithPrivyWallet}
+      >
+        {pending
+          ? isFherc20Ready()
+            ? "Encrypting and signing..."
+            : "Configure FHERC20 token"
+          : status === "paid"
+            ? "Payment recorded"
+            : `Pay ${invoice.amount} ${invoice.token}`}
+      </button>
+      <p className="tiny">
+        This signs one encrypted FHERC20 transfer. Email users get a Privy embedded wallet; wallet users sign with their connected wallet.
+      </p>
+      {error && <p className="tiny error-text">{error}</p>}
+    </>
   );
 }
